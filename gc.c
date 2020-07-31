@@ -2849,7 +2849,15 @@ obj_free(rb_objspace_t *objspace, VALUE obj)
 	if (RCLASS_CALLABLE_M_TBL(obj) != NULL) {
 	    rb_id_table_free(RCLASS_CALLABLE_M_TBL(obj));
 	}
+
+        if (RCLASS_EXT(obj)->parent_subclasses) {
+            rb_bug("iclasses shouldn't have parent subclasses");
+        }
+        if (RCLASS_EXT(obj)->module_subclasses) {
+            rb_bug("iclasses shouldn't have module subclasses");
+        }
 	if (RCLASS_EXT(obj)->subclasses) {
+            rb_bug("iclasses shouldn't have subclasses");
 	    rb_class_detach_subclasses(obj);
 	    RCLASS_EXT(obj)->subclasses = NULL;
 	}
