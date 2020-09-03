@@ -11817,7 +11817,7 @@ rb_raw_obj_info(char *buff, const int buff_size, VALUE obj)
             {
                 VALUE class_path = rb_class_path_cached(obj);
                 if (!NIL_P(class_path)) {
-                    APPENDF((BUFF_ARGS, "%s", RSTRING_PTR(class_path)));
+                    APPENDF((BUFF_ARGS, "%.*s", str_len_no_raise(class_path), RSTRING_PTR(class_path)));
                 }
                 else {
                     APPENDF((BUFF_ARGS, "(annon)"));
@@ -11828,7 +11828,7 @@ rb_raw_obj_info(char *buff, const int buff_size, VALUE obj)
             {
                 VALUE class_path = rb_class_path_cached(RBASIC_CLASS(obj));
                 if (!NIL_P(class_path)) {
-                    APPENDF((BUFF_ARGS, "src:%s", RSTRING_PTR(class_path)));
+                    APPENDF((BUFF_ARGS, "src:%.*s", str_len_no_raise(class_path), RSTRING_PTR(class_path)));
                 }
                 break;
             }
@@ -11912,11 +11912,20 @@ rb_raw_obj_info(char *buff, const int buff_size, VALUE obj)
                 }
               case imemo_callcache:
                 {
+                    const char *class_path_buffer;
+                    int class_path_len;
                     const struct rb_callcache *cc = (const struct rb_callcache *)obj;
                     VALUE class_path = cc->klass ? rb_class_path_cached(cc->klass) : Qnil;
-
-                    APPENDF((BUFF_ARGS, "(klass:%s, cme:%s (%p) call:%p",
-                             NIL_P(class_path) ? "??" : RSTRING_PTR(class_path),
+                    if (NIL_P(class_path)) {
+                        class_path_buffer = "??";
+                        class_path_len = 2;
+                    }
+                    else {
+                        class_path_buffer = RSTRING_PTR(class_path);
+                        class_path_len = str_len_no_raise(class_path);
+                    }
+                    APPENDF((BUFF_ARGS, "(klass:%.*s, cme:%s (%p) call:%p",
+                             class_path_len, class_path_buffer,
                              vm_cc_cme(cc) ? rb_id2name(vm_cc_cme(cc)->called_id) : "<NULL>",
                              (void *)vm_cc_cme(cc), (void *)vm_cc_call(cc)));
                     break;
