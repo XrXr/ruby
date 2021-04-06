@@ -53,7 +53,7 @@ module Test
         e, f, s = @errors, @failures, @skips
 
         result = [nil,nil]
-        Timeout.timeout(120) do
+        Timeout.timeout(420) do
           begin
             result = orig_run_suite(suite, type)
           rescue Interrupt
