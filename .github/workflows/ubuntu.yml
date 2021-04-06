@@ -66,7 +66,7 @@ jobs:
       - run: make $JOBS -s ${{ matrix.test_task }}
         timeout-minutes: 30
         env:
-          RUBY_TESTOPTS: "--verbose --tty=no"
+          RUBY_TESTOPTS: "-q --tty=no"
           TEST_BUNDLED_GEMS_ALLOW_FAILURES: ""
       - uses: k0kubun/action-slack@v2.0.0
         with:

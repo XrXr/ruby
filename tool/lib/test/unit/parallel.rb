@@ -7,6 +7,7 @@ require "tracepointchecker"
 require "zombie_hunter"
 require "iseq_loader_checker"
 require "gc_compact_checker"
+require 'timeout'
 
 module Test
   module Unit
@@ -51,11 +52,14 @@ module Test
 
         e, f, s = @errors, @failures, @skips
 
-        begin
-          result = orig_run_suite(suite, type)
-        rescue Interrupt
-          @need_exit = true
-          result = [nil,nil]
+        result = [nil,nil]
+        Timeout.timeout(120) do
+          begin
+            result = orig_run_suite(suite, type)
+          rescue Interrupt
+            @need_exit = true
+            result = [nil,nil]
+          end
         end
 
         MiniTest::Unit.output = orig_testout
