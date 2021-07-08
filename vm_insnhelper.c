@@ -3047,7 +3047,7 @@ vm_call_attrset(rb_execution_context_t *ec, rb_control_frame_t *cfp, struct rb_c
 }
 
 static inline VALUE
-vm_call_bmethod_body(rb_execution_context_t *ec, struct rb_calling_info *calling, const VALUE *argv)
+vm_call_bmethod_body(rb_execution_context_t *ec, struct rb_calling_info *calling, const VALUE *argv, bool calling_from_vm)
 {
     rb_proc_t *proc;
     VALUE val;
@@ -3062,7 +3062,7 @@ vm_call_bmethod_body(rb_execution_context_t *ec, struct rb_calling_info *calling
 
     /* control block frame */
     GetProcPtr(procv, proc);
-    val = rb_vm_invoke_bmethod(ec, proc, calling->recv, calling->argc, argv, calling->kw_splat, calling->block_handler, vm_cc_cme(cc));
+    val = rb_vm_invoke_bmethod(ec, proc, calling->recv, calling->argc, argv, calling->kw_splat, calling->block_handler, vm_cc_cme(cc), calling_from_vm);
 
     return val;
 }
@@ -3082,7 +3082,7 @@ vm_call_bmethod(rb_execution_context_t *ec, rb_control_frame_t *cfp, struct rb_c
     MEMCPY(argv, cfp->sp - argc, VALUE, argc);
     cfp->sp += - argc - 1;
 
-    return vm_call_bmethod_body(ec, calling, argv);
+    return vm_call_bmethod_body(ec, calling, argv, true);
 }
 
 MJIT_FUNC_EXPORTED VALUE

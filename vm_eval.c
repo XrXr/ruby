@@ -204,7 +204,7 @@ vm_call0_body(rb_execution_context_t *ec, struct rb_calling_info *calling, const
 	ret = rb_attr_get(calling->recv, vm_cc_cme(cc)->def->body.attr.id);
 	goto success;
       case VM_METHOD_TYPE_BMETHOD:
-        ret = vm_call_bmethod_body(ec, calling, argv);
+        ret = vm_call_bmethod_body(ec, calling, argv, false);
 	goto success;
       case VM_METHOD_TYPE_ZSUPER:
         {
