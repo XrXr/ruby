@@ -3094,6 +3094,34 @@ class TestModule < Test::Unit::TestCase
     assert_match(/::Foo$/, mod.name, '[Bug #14895]')
   end
 
+  def test_initialize_copy_on_live_module
+    mod = Module.new
+    mod.define_method(:foo) { :first }
+    klass = Class.new { include mod }
+    instance = klass.new
+    assert_equal(:first, instance.foo)
+    new_mod = Module.new
+    new_mod.define_method(:foo) { :second }
+    mod.send(:initialize_copy, new_mod)
+    4.times { GC.start }
+    assert_equal(:second, instance.foo, '[Bug #17048]')
+  end
+
+  def test_initialize_copy_on_live_module_with_prepend
+    mod = Module.new
+    mod.prepend(Module.new)
+    mod.define_method(:foo) { :first }
+    klass = Class.new { include mod }
+    instance = klass.new
+    assert_equal(:first, instance.foo)
+    new_mod = Module.new
+    new_mod.prepend(Module.new)
+    new_mod.define_method(:foo) { :second }
+    mod.send(:initialize_copy, new_mod)
+    4.times { GC.start }
+    assert_equal(:second, instance.foo, '[Bug #17048]')
+  end
+
   private
 
   def assert_top_method_is_private(method)
