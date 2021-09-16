@@ -340,6 +340,8 @@ copy_tables(VALUE clone, VALUE orig)
 	arg.tbl = RCLASS_CONST_TBL(clone) = rb_id_table_create(0);
 	arg.klass = clone;
 	rb_id_table_foreach(RCLASS_CONST_TBL(orig), clone_const_i, &arg);
+        // In case we are reinitializing
+        rb_clear_constant_cache();
     }
 }
 
