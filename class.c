@@ -311,6 +311,14 @@ class_init_copy_check(VALUE clone, VALUE orig)
     }
 }
 
+static enum rb_id_table_iterator_result
+empty_method_table_i(ID mid, VALUE value, void *data)
+{
+    VALUE klass = (VALUE)data;
+    rb_clear_method_cache(klass, mid);
+    return ID_TABLE_DELETE;
+}
+
 static void
 copy_tables(VALUE clone, VALUE orig)
 {
@@ -322,7 +330,6 @@ copy_tables(VALUE clone, VALUE orig)
 	rb_free_const_table(RCLASS_CONST_TBL(clone));
 	RCLASS_CONST_TBL(clone) = 0;
     }
-    RCLASS_M_TBL(clone) = 0;
     if (RCLASS_IV_TBL(orig)) {
 	st_data_t id;
 
@@ -370,7 +377,7 @@ rb_mod_init_copy(VALUE clone, VALUE orig)
 	struct clone_method_arg arg;
 	arg.old_klass = orig;
 	arg.new_klass = clone;
-	RCLASS_M_TBL_INIT(clone);
+        rb_id_table_foreach(RCLASS_M_TBL(clone), empty_method_table_i, (void *)clone);
 	rb_id_table_foreach(RCLASS_M_TBL(orig), clone_method_i, &arg);
     }
 
