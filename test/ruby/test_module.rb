@@ -3122,6 +3122,27 @@ class TestModule < Test::Unit::TestCase
     assert_equal(:second, instance.foo, '[Bug #17048]')
   end
 
+  def test_constant_caching_with_reinitialized_modules
+    mod = Module.new
+    mod.const_set(:Const, :first)
+
+    klass = Class.new { include mod }
+    ins = klass.new
+
+    # Use this syntax to get opt_getinlinecache
+    class << ins
+      def foo
+        Const
+      end
+    end
+
+    new_mod = Module.new
+    new_mod.const_set(:Const, :second)
+    assert_equal(:first, ins.foo)
+    mod.send(:initialize_copy, new_mod)
+    assert_equal(:second, ins.foo, '[Bug #17048]')
+  end
+
   private
 
   def assert_top_method_is_private(method)
