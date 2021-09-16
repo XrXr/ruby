@@ -388,7 +388,16 @@ rb_mod_init_copy(VALUE clone, VALUE orig)
     }
 
     if (RCLASS_ORIGIN(orig) == orig) {
-        RCLASS_SET_SUPER(clone, RCLASS_SUPER(orig));
+        if (RCLASS_ORIGIN(clone) == clone) {
+            RCLASS_SET_SUPER(clone, RCLASS_SUPER(orig));
+        }
+        else {
+            // Clone has an origin. In case we are reinitializing, there might
+            // be live iclasses that share the method table with the origin.
+            VALUE clone_origin = RCLASS_ORIGIN(clone);
+            RCLASS_SET_SUPER(clone, clone_origin);
+            RCLASS_SET_SUPER(clone_origin, RCLASS_SUPER(orig));
+        }
     }
     else {
         VALUE p = RCLASS_SUPER(orig);

@@ -3143,6 +3143,20 @@ class TestModule < Test::Unit::TestCase
     assert_equal(:second, ins.foo, '[Bug #17048]')
   end
 
+  def test_reinitializing_prepended_module_with_a_module_without_prepend
+    mod = Module.new
+    mod.prepend(Module.new)
+    klass = Class.new { include mod }
+    instance = klass.new
+    new_mod_super = Module.new
+    new_mod = Module.new { include(new_mod_super) }
+    new_mod.define_method(:foo) { :ok }
+    mod.send(:initialize_copy, new_mod)
+    4.times { GC.start }
+    assert_equal(:ok, instance.foo, '[Bug #17048]')
+    assert_equal([mod, new_mod_super], mod.ancestors)
+  end
+
   private
 
   def assert_top_method_is_private(method)
