@@ -825,9 +825,11 @@ compile_c_to_so(const char *c_file, const char *so_file)
 
     // files[5] = "-Fd*.pdb"
     files[5] = p = alloca(sizeof(char) * (rb_strlen_lit("-Fd") + strlen(pch_file) + 1));
+#if 0
     p = append_lit(p, "-Fd");
     p = append_str2(p, pch_file, strlen(pch_file) - rb_strlen_lit(".pch"));
     p = append_lit(p, ".pdb");
+#endif
     *p = '\0';
 
     char **args = form_args(5, CC_LDSHARED_ARGS, CC_CODEFLAG_ARGS,
