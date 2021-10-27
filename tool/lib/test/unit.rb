@@ -1015,7 +1015,7 @@ module Test
       def run(*args)
         result = super
         puts "\nruby -v: #{RUBY_DESCRIPTION}"
-        pp RbConfig::CONFIG
+        puts File.read('./mjit_config.h')
         result
       end
 
