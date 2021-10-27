@@ -1015,6 +1015,7 @@ module Test
       def run(*args)
         result = super
         puts "\nruby -v: #{RUBY_DESCRIPTION}"
+        pp RbConfig::CONFIG
         result
       end
 
