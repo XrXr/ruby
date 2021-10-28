@@ -788,7 +788,7 @@ static const int c_file_access_mode =
 static bool
 compile_c_to_so(const char *c_file, const char *so_file)
 {
-    const char *files[] = { NULL, NULL, NULL, NULL, NULL, NULL, "-link", libruby_pathflag, NULL };
+    const char *files[] = { NULL, NULL, NULL, NULL, NULL, NULL, NULL, "-link", libruby_pathflag, NULL };
     char *p;
 
     // files[0] = "-Fe*.dll"
@@ -828,6 +828,11 @@ compile_c_to_so(const char *c_file, const char *so_file)
     p = append_lit(p, "-Fd");
     p = append_str2(p, c_file, strlen(c_file));
     p = append_lit(p, ".pdb");
+    *p = '\0';
+
+    // files[5] = "-Z7"
+    files[6] = p = alloca(sizeof(char) * rb_strlen_lit("-Z7") + 1);
+    p = append_lit(p, "-Z7");
     *p = '\0';
 
     char **args = form_args(5, CC_LDSHARED_ARGS, CC_CODEFLAG_ARGS,
