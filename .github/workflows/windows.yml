@@ -95,7 +95,7 @@ jobs:
         timeout-minutes: 60
         run: |
           C:\ProgramData\chocolatey\lib\winlibs\tools\mingw64\bin\llvm-pdbutil dump -streams -summary include/ruby-3.1.0/x64-mswin64_140/rb_mjit_header-3.1.0.pdb
-          nmake test-all TESTOPTS="-j%NUMBER_OF_PROCESSORS% --job-status=normal --seed=64761"
+          nmake test-all TESTOPTS="-j%NUMBER_OF_PROCESSORS% --job-status=normal"
           C:\ProgramData\chocolatey\lib\winlibs\tools\mingw64\bin\llvm-pdbutil dump -streams -summary include/ruby-3.1.0/x64-mswin64_140/rb_mjit_header-3.1.0.pdb
         continue-on-error: ${{ matrix.continue-on-error || false }}
       - name: nmake test-spec
