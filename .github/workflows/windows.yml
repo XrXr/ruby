@@ -94,9 +94,9 @@ jobs:
       - name: nmake test-all
         timeout-minutes: 60
         run: |
-          llvm-pdbutil dump -summary include/ruby-3.1.0/x64-mswin64_140/rb_mjit_header-3.1.0.pdb
-          nmake test-all TESTS="test/ruby/test_jit.rb"
-          llvm-pdbutil dump -summary include/ruby-3.1.0/x64-mswin64_140/rb_mjit_header-3.1.0.pdb
+          C:\ProgramData\chocolatey\lib\winlibs\tools\mingw64\bin\llvm-pdbutil dump -summary include/ruby-3.1.0/x64-mswin64_140/rb_mjit_header-3.1.0.pdb
+          nmake test-all TESTS="../src/test/ruby/test_jit.rb"
+          C:\ProgramData\chocolatey\lib\winlibs\tools\mingw64\bin\llvm-pdbutil dump -summary include/ruby-3.1.0/x64-mswin64_140/rb_mjit_header-3.1.0.pdb
         continue-on-error: ${{ matrix.continue-on-error || false }}
       - name: nmake test-spec
         timeout-minutes: 10
