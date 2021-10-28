@@ -55,6 +55,7 @@ jobs:
           # if you pass multiple package names in a single command.
           Choco-Install -PackageName openssl
           Choco-Install -PackageName winflexbison3
+          Choco-Install -PackageName llvm
         shell: pwsh
       - name: git config
         run: |
