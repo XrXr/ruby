@@ -56,7 +56,6 @@ jobs:
           Choco-Install -PackageName openssl
           Choco-Install -PackageName winflexbison3
           Choco-Install -PackageName winlibs
-          llvm-pdbutil
         shell: pwsh
       - name: git config
         run: |
@@ -95,6 +94,7 @@ jobs:
       - name: nmake test-all
         timeout-minutes: 60
         run: |
+          llvm-pdbutil dump -summary include/ruby-3.1.0/x64-mswin64_140/rb_mjit_header-3.1.0.pdb
           nmake test-all TESTS="test/ruby/test_jit.rb"
           llvm-pdbutil dump -summary include/ruby-3.1.0/x64-mswin64_140/rb_mjit_header-3.1.0.pdb
         continue-on-error: ${{ matrix.continue-on-error || false }}
