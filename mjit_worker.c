@@ -824,9 +824,9 @@ compile_c_to_so(const char *c_file, const char *so_file)
     *p = '\0';
 
     // files[5] = "-Fd*.pdb"
-    files[5] = p = alloca(sizeof(char) * (rb_strlen_lit("-Fd") + strlen(pch_file) + 1));
+    files[5] = p = alloca(sizeof(char) * (rb_strlen_lit("-Fd") + strlen(c_file) + rb_strlen_lit(".pdb") + 1));
     p = append_lit(p, "-Fd");
-    p = append_str2(p, pch_file, strlen(pch_file) - rb_strlen_lit(".pch"));
+    p = append_str2(p, c_file, strlen(c_file));
     p = append_lit(p, ".pdb");
     *p = '\0';
 
