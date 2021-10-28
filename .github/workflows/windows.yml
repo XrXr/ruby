@@ -55,7 +55,8 @@ jobs:
           # if you pass multiple package names in a single command.
           Choco-Install -PackageName openssl
           Choco-Install -PackageName winflexbison3
-          Choco-Install -PackageName llvm
+          Choco-Install -PackageName winlibs
+          llvm-pdbutil
         shell: pwsh
       - name: git config
         run: |
@@ -91,13 +92,10 @@ jobs:
           nmake
         env:
           YACC: win_bison
-      - name: nmake test
-        timeout-minutes: 5
-        run: |
-          nmake test
       - name: nmake test-all
         timeout-minutes: 60
         run: |
+          nmake test-all TESTS="test/ruby/test_jit.rb"
           llvm-pdbutil dump -summary include/ruby-3.1.0/x64-mswin64_140/rb_mjit_header-3.1.0.pdb
         continue-on-error: ${{ matrix.continue-on-error || false }}
       - name: nmake test-spec
