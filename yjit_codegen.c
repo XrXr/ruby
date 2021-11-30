@@ -3211,6 +3211,10 @@ c_method_tracing_currently_enabled(const jitstate_t *jit)
     return tracing_events & (RUBY_EVENT_C_CALL | RUBY_EVENT_C_RETURN);
 }
 
+// FIXME: very much a snowflake and temporary!
+// same type as struct rb_method_definition_struct::method_serial.
+static uintptr_t serial_for_boot_integer_times;
+
 static codegen_status_t
 gen_send_cfunc(jitstate_t *jit, ctx_t *ctx, const struct rb_callinfo *ci, const rb_callable_method_entry_t *cme, rb_iseq_t *block, const int32_t argc, VALUE *recv_known_klass)
 {
@@ -3385,18 +3389,36 @@ gen_send_cfunc(jitstate_t *jit, ctx_t *ctx, const struct rb_callinfo *ci, const 
         mov(cb, C_ARG_REGS[2], mem_opnd(64, RAX, -(argc + 1) * SIZEOF_VALUE));
     }
 
-    // Call the C function
-    // VALUE ret = (cfunc->func)(recv, argv[0], argv[1]);
-    // cfunc comes from compile-time cme->def, which we assume to be stable.
-    // Invalidation logic is in rb_yjit_method_lookup_change()
-    call_ptr(cb, REG0, (void*)cfunc->func);
+    // TODO: Super hacky and temporary!
+    if (cme->def->method_serial == serial_for_boot_integer_times &&
+            block && // specialize for the case where caller paseses literal block. e.g. 1.times{}
+            iseq_lead_only_arg_setup_p(block) && block->body->param.size == 0 && // specialize for blocks that take no arguments. not sure if first condition is required.
+            FIXNUM_P(comptime_recv) && // specialize for small integers. boxed integers require method calls to work with
+            ) {
 
-    // Record code position for TracePoint patching. See full_cfunc_return().
-    record_global_inval_patch(cb, outline_full_cfunc_return_pos);
+        print_str(cb, "called into integer times");
 
-    // Push the return value on the Ruby stack
-    x86opnd_t stack_ret = ctx_stack_push(ctx, TYPE_UNKNOWN);
-    mov(cb, stack_ret, RAX);
+        // Push the return value on the Ruby stack
+        x86opnd_t stack_ret = ctx_stack_push(ctx, TYPE_UNKNOWN);
+        mov(cb, REG0, imm_opnd(Qnil));
+        mov(cb, stack_ret, REG0);
+        // blindspot(Alan): not sure if I need to clear local types here. Failing to come up with examples that prove or disprove.
+    }
+    else {
+
+        // Call the C function
+        // VALUE ret = (cfunc->func)(recv, argv[0], argv[1]);
+        // cfunc comes from compile-time cme->def, which we assume to be stable.
+        // Invalidation logic is in rb_yjit_method_lookup_change()
+        call_ptr(cb, REG0, (void*)cfunc->func);
+
+        // Record code position for TracePoint patching. See full_cfunc_return().
+        record_global_inval_patch(cb, outline_full_cfunc_return_pos);
+
+        // Push the return value on the Ruby stack
+        x86opnd_t stack_ret = ctx_stack_push(ctx, TYPE_UNKNOWN);
+        mov(cb, stack_ret, RAX);
+    }
 
     // Pop the stack frame (ec->cfp++)
     add(
@@ -5035,6 +5057,13 @@ yjit_init_codegen(void)
     yjit_reg_method(rb_cString, "to_s", jit_rb_str_to_s);
     yjit_reg_method(rb_cString, "to_str", jit_rb_str_to_s);
     yjit_reg_method(rb_cString, "bytesize", jit_rb_str_bytesize);
+
+    // TODO: this is a temporary hack to get "inlining" working.
+    {
+        ID mid = rb_intern("times");
+        const rb_method_entry_t *me = rb_method_entry_at(rb_cInteger, mid);
+        serial_for_boot_integer_times = me->def->method_serial;
+    }
 
     // Thread.current
     yjit_reg_method(rb_singleton_class(rb_cThread), "current", jit_thread_s_current);
