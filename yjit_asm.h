@@ -367,6 +367,7 @@ static inline void jmp_ptr(codeblock_t *cb, uint8_t *ptr);
 static inline void jmp_rm(codeblock_t *cb, x86opnd_t opnd);
 static inline void jmp32(codeblock_t *cb, int32_t offset);
 static inline void lea(codeblock_t *cb, x86opnd_t dst, x86opnd_t src);
+static inline void lea_label(codeblock_t *cb, x86opnd_t dst, uint32_t label_idx);
 static inline void mov(codeblock_t *cb, x86opnd_t dst, x86opnd_t src);
 static inline void movsx(codeblock_t *cb, x86opnd_t dst, x86opnd_t src);
 static inline void neg(codeblock_t *cb, x86opnd_t opnd);

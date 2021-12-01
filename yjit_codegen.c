@@ -3216,7 +3216,7 @@ c_method_tracing_currently_enabled(const jitstate_t *jit)
 static uintptr_t serial_for_boot_integer_times;
 
 static codegen_status_t
-gen_send_cfunc(jitstate_t *jit, ctx_t *ctx, const struct rb_callinfo *ci, const rb_callable_method_entry_t *cme, rb_iseq_t *block, const int32_t argc, VALUE *recv_known_klass)
+gen_send_cfunc(jitstate_t *jit, ctx_t *ctx, const struct rb_callinfo *ci, const rb_callable_method_entry_t *cme, rb_iseq_t *block, const int32_t argc, VALUE sample_recv, VALUE *recv_known_klass)
 {
     const rb_method_cfunc_t *cfunc = UNALIGNED_MEMBER_PTR(cme->def, body.cfunc);
 
@@ -3391,10 +3391,30 @@ gen_send_cfunc(jitstate_t *jit, ctx_t *ctx, const struct rb_callinfo *ci, const 
 
     // TODO: Super hacky and temporary!
     if (cme->def->method_serial == serial_for_boot_integer_times &&
-            block && // specialize for the case where caller paseses literal block. e.g. 1.times{}
-            iseq_lead_only_arg_setup_p(block) && block->body->param.size == 0 && // specialize for blocks that take no arguments. not sure if first condition is required.
-            FIXNUM_P(comptime_recv) && // specialize for small integers. boxed integers require method calls to work with
-            ) {
+            block && // specialize for the case where caller passes literal block. e.g. 1.times{}
+            block->body->param.size == 0 && // specialize for blocks that take no arguments. not sure if this is enough to rule out everything. What if the block takes a block?.
+            FIXNUM_P(sample_recv) // specialize for small integers. boxed integers require method calls to work with
+       ) {
+
+        // TODO draw ASCII diagram for the two stacks to help illustrate
+
+        // lea rax, after_yield_in_integer_times ; lowers to a IP-relative LEA.
+        // push rax
+        // ; logic for yielding.
+        //
+        // after_yield_in_integer_times:
+
+// top
+// return_addr
+// ec
+// sp
+// cfp
+// return_addr
+//
+//
+//
+//
+// bottom
 
         print_str(cb, "called into integer times");
 
@@ -4116,7 +4136,7 @@ gen_send_general(jitstate_t *jit, ctx_t *ctx, struct rb_call_data *cd, rb_iseq_t
                 GEN_COUNTER_INC(cb, send_cfunc_kwargs);
                 return YJIT_CANT_COMPILE;
             }
-            return gen_send_cfunc(jit, ctx, ci, cme, block, argc, &comptime_recv_klass);
+            return gen_send_cfunc(jit, ctx, ci, cme, block, argc, comptime_recv, &comptime_recv_klass);
           case VM_METHOD_TYPE_IVAR:
             if (argc != 0) {
                 // Argument count mismatch. Getters take no arguments.
@@ -4355,7 +4375,7 @@ gen_invokesuper(jitstate_t *jit, ctx_t *ctx, codeblock_t *cb)
       case VM_METHOD_TYPE_ISEQ:
         return gen_send_iseq(jit, ctx, ci, cme, block, argc);
       case VM_METHOD_TYPE_CFUNC:
-        return gen_send_cfunc(jit, ctx, ci, cme, block, argc, NULL);
+        return gen_send_cfunc(jit, ctx, ci, cme, block, argc, comptime_recv, NULL);
       default:
         break;
     }

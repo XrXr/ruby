@@ -170,6 +170,31 @@ void run_assembler_tests(void)
         check_bytes(cb, "E9FBFFFFFF");
     }
 
+    // lea with labels
+    {
+        cb_set_pos(cb, 0);
+        uint32_t before = cb_new_label(cb, "before");
+        lea_label(cb, RAX, before);
+        cb_link_labels(cb);
+        check_bytes(cb, "488D05F9FFFFFF");
+
+        cb_set_pos(cb, 0);
+        uint32_t after = cb_new_label(cb, "after");
+        lea_label(cb, R12, before);
+        cb_write_label(cb, after);
+        cb_link_labels(cb);
+        check_bytes(cb, "4C8D2500000000");
+
+        cb_set_pos(cb, 0);
+        after = cb_new_label(cb, "after");
+        lea_label(cb, R9, before);
+        cb_set_pos(cb, cb->write_pos + 0x42);
+        cb_write_label(cb, after);
+        cb_link_labels(cb);
+        cb_set_pos(cb, 7);
+        check_bytes(cb, "4C8D0D42000000");
+    }
+
     // jmp with RM operand
     cb_set_pos(cb, 0); jmp_rm(cb, R12); check_bytes(cb, "41FFE4");
 

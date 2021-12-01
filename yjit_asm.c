@@ -379,6 +379,21 @@ void cb_label_ref(codeblock_t *cb, uint32_t label_idx)
     cb->num_refs++;
 }
 
+// Add a label reference at the current write position minus.
+// Relative addressing is usually relative to the end of an instruction,
+// and this function is handy for referencing a label after writing an
+// instruction out.
+static void
+cb_label_ref_rel(codeblock_t *cb, uint32_t label_idx)
+{
+    assert (label_idx < MAX_LABELS);
+    assert (cb->num_refs < MAX_LABEL_REFS);
+
+    // Keep track of the reference
+    cb->label_refs[cb->num_refs] = (labelref_t){ cb->write_pos-4, label_idx };
+    cb->num_refs++;
+}
+
 // Link internal label references
 void cb_link_labels(codeblock_t *cb)
 {
@@ -1257,6 +1272,26 @@ void lea(codeblock_t *cb, x86opnd_t dst, x86opnd_t src)
     //cb.writeASM("lea", dst, src);
     assert (dst.num_bits == 64);
     cb_write_rm(cb, false, true, dst, src, 0xFF, 1, 0x8D);
+}
+
+// Load the address of a label into a register via IP-relative addressing
+void
+lea_label(codeblock_t *cb, x86opnd_t dst, uint32_t label_idx)
+{
+    assert(dst.type == OPND_REG && dst.num_bits == 64);
+
+    x86opnd_t ip_rel_opnd = {
+        .type = OPND_MEM,
+        .num_bits = 64,
+        .as.mem = {
+            .base_reg_no = 5, // 0b101. Required for using IP-rel addressing
+                              // in the ModR/M byte. Maybe this should go into
+                              // cb_write_rm().
+            .is_iprel = true,
+        },
+    };
+    cb_write_rm(cb, false, true, dst, ip_rel_opnd, 0xFF, 1, 0x8D);
+    cb_label_ref_rel(cb, label_idx);
 }
 
 // Does this number fit in 32 bits and stays the same if you zero extend it to 64 bit?
