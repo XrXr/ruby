@@ -3445,6 +3445,9 @@ gen_send_cfunc(jitstate_t *jit, ctx_t *ctx, const struct rb_callinfo *ci, const 
         // We can't side exit here because we already pushed the frame for Integer#times,
         // so we need to fall back to the usual logic for calling into the C function
         // implementing Integer#times.
+        // 
+        // Actually, this is more like an assert. guard_known_class also guards that the receiver is an immediate.
+        // Could do a compile time assert in addition to the runtime assert below.
         test(cb, REG0_8, imm_opnd(1));
         jz_label(cb, yikes_not_fixnum);
 
