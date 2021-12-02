@@ -35,7 +35,7 @@ pop_regs(codeblock_t *cb)
 static void
 print_int_cfun(int64_t val)
 {
-    fprintf(stderr, "%lld\n", (long long int)val);
+    fprintf(stderr, "%llx\n", (long long int)val);
 }
 
 RBIMPL_ATTR_MAYBE_UNUSED()

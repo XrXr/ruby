@@ -3397,32 +3397,79 @@ gen_send_cfunc(jitstate_t *jit, ctx_t *ctx, const struct rb_callinfo *ci, const 
        ) {
 
         // TODO draw ASCII diagram for the two stacks to help illustrate
-
-        // lea rax, after_yield_in_integer_times ; lowers to a IP-relative LEA.
-        // push rax
-        // ; logic for yielding.
+        // top
+        // return_addr
+        // ec
+        // sp
+        // cfp
+        // return_addr
         //
-        // after_yield_in_integer_times:
+        //
+        //
+        //
+        // bottom
 
-// top
-// return_addr
-// ec
-// sp
-// cfp
-// return_addr
-//
-//
-//
-//
-// bottom
+        //   mov reg0, reciver
+        //   sar reg0, 1       ; fixnum unbox. could do ror with jc for paranoia; TODO: ask Seaton about whether this is a correct use of the word "unbox"
+        //   xor reg1, reg1    ; zero out loop index
+        // integer_times_loop:
+        //   cmp reg1, reg0    ; NOTE: test with a negative receiver.
+        //   jge integer_times_return
+        //   ; setup control frame for Ruby block parameter
+        //   call block_param_with_jit_frame_setup
+        //   add reg1, 1
+        //   jmp integer_times_loop
+        // integer_times_return:
+        //   ; pop control frame for Integer#times
+        //   ; NOTE: the interpreter checks for interrupts when popping control frames
+        //           but YJIT does it before pushing the control frame. Seems to work so far.
+        //   ; push Integer#times receiver onto the stack (that's the Ruby level return value).
+        //   ; need to box it again because we unboxed it above!
+        // block_param_with_jit_frame_setup:
+        //   ; reuse yjit_entry_prologue()
+        //   ; lazy stub for unconditional jump with context. (don't think we have that capability in yjit_core.c at the moment)
+        //
 
-        print_str(cb, "called into integer times");
+
+        print_str(cb, "from YJIT inlined Integer#times");
+
+        uint32_t integer_times_return = cb_new_label(cb, "integer_times_return");
+        uint32_t integer_times_loop = cb_new_label(cb, "integer_times_loop");
+        uint32_t block_param_with_jit_frame_setup = cb_new_label(cb, "block_param_with_jit_frame_setup");
+        uint32_t yikes_not_fixnum = cb_new_label(cb, "yikes");
+
+
+        mov(cb, REG0, ctx_sp_opnd(ctx, 0)); // you might be tempted to use `recv`, but it's invalid here because we did save_sp above.
+
+        // Bail in case of large integers.
+        // We can't side exit here because we already pushed the frame for Integer#times,
+        // so we need to fall back to the usual logic for calling into the C function
+        // implementing Integer#times.
+        test(cb, REG0_8, imm_opnd(1));
+        jz_label(cb, yikes_not_fixnum);
+
+        sar(cb, REG0, imm_opnd(1)); // Untag the fixnum
+
+        print_int(cb, REG0);
+
+
+        // Box the receiver again
+        shl(cb, REG0, imm_opnd(1));
+        or(cb, REG0, imm_opnd(1));
 
         // Push the return value on the Ruby stack
         x86opnd_t stack_ret = ctx_stack_push(ctx, TYPE_UNKNOWN);
-        mov(cb, REG0, imm_opnd(Qnil));
         mov(cb, stack_ret, REG0);
+        jmp_label(cb, integer_times_return);
+
+
         // blindspot(Alan): not sure if I need to clear local types here. Failing to come up with examples that prove or disprove.
+
+        cb_write_label(cb, yikes_not_fixnum);
+        cb_write_byte(cb, 0x06); // PUSH ES. In long mode this raises #UD, just like UD2.
+
+        cb_write_label(cb, integer_times_return);
+        cb_link_labels(cb);
     }
     else {
 
