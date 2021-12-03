@@ -3413,7 +3413,7 @@ gen_send_cfunc(jitstate_t *jit, ctx_t *ctx, const struct rb_callinfo *ci, const 
         //   sar reg0, 1       ; fixnum unbox. could do ror with jc for paranoia; TODO: ask Seaton about whether this is a correct use of the word "unbox"
         //   xor reg1, reg1    ; zero out loop index
         // integer_times_loop:
-        //   cmp reg1, reg0    ; NOTE: test with a negative receiver.
+        //   cmp reg1, reg0    ; NOTE: make test cases with a negative receiver.
         //   jge integer_times_return
         //   ; setup control frame for Ruby block parameter
         //   call block_param_with_jit_frame_setup
@@ -3430,6 +3430,10 @@ gen_send_cfunc(jitstate_t *jit, ctx_t *ctx, const struct rb_callinfo *ci, const 
         //   ; lazy stub for unconditional jump with context. (don't think we have that capability in yjit_core.c at the moment)
         //
 
+        // TODO move keyword arg checks and splat check into this function.
+        // TODO ^ make test cases for them
+        // TODO might be worth using rb_simple_iseq_p to make it more clear that
+        //      we are doing the same thing as the interpreter.
 
         print_str(cb, "from YJIT inlined Integer#times");
 
@@ -3445,7 +3449,7 @@ gen_send_cfunc(jitstate_t *jit, ctx_t *ctx, const struct rb_callinfo *ci, const 
         // We can't side exit here because we already pushed the frame for Integer#times,
         // so we need to fall back to the usual logic for calling into the C function
         // implementing Integer#times.
-        // 
+        //
         // Actually, this is more like an assert. guard_known_class also guards that the receiver is an immediate.
         // Could do a compile time assert in addition to the runtime assert below.
         test(cb, REG0_8, imm_opnd(1));
@@ -3453,8 +3457,28 @@ gen_send_cfunc(jitstate_t *jit, ctx_t *ctx, const struct rb_callinfo *ci, const 
 
         sar(cb, REG0, imm_opnd(1)); // Untag the fixnum
 
-        print_int(cb, REG0);
+        // Initialize loop index to 0
+        xor(cb, REG1, REG1);
 
+        // Loop head
+        cb_write_label(cb, integer_times_loop);
+        cmp(cb, REG1, REG0);
+        jge_label(cb, integer_times_return);
+
+        // Setup CFP
+
+        // Call YJIT code for the blocok parameter
+        call_label(cb, block_param_with_jit_frame_setup);
+
+        add(cb, REG1, imm_opnd(1));
+        jmp_label(cb, integer_times_loop);
+
+
+        // blindspot(Alan): not sure if I need to clear local types here. Failing to come up with examples that prove or disprove.
+        cb_write_label(cb, yikes_not_fixnum);
+        cb_write_byte(cb, 0x06); // PUSH ES. In long mode this raises #UD, just like UD2.
+
+        cb_write_label(cb, integer_times_return);
 
         // Box the receiver again
         shl(cb, REG0, imm_opnd(1));
@@ -3463,15 +3487,7 @@ gen_send_cfunc(jitstate_t *jit, ctx_t *ctx, const struct rb_callinfo *ci, const 
         // Push the return value on the Ruby stack
         x86opnd_t stack_ret = ctx_stack_push(ctx, TYPE_UNKNOWN);
         mov(cb, stack_ret, REG0);
-        jmp_label(cb, integer_times_return);
 
-
-        // blindspot(Alan): not sure if I need to clear local types here. Failing to come up with examples that prove or disprove.
-
-        cb_write_label(cb, yikes_not_fixnum);
-        cb_write_byte(cb, 0x06); // PUSH ES. In long mode this raises #UD, just like UD2.
-
-        cb_write_label(cb, integer_times_return);
         cb_link_labels(cb);
     }
     else {
