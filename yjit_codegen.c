@@ -536,23 +536,11 @@ gen_full_cfunc_return(void)
     ret(cb);
 }
 
-/*
-Compile an interpreter entry block to be inserted into an iseq
-Returns `NULL` if compilation fails.
-*/
-static uint8_t *
-yjit_entry_prologue(codeblock_t *cb, const rb_iseq_t *iseq)
+enum { MAX_PROLOGUE_SIZE = 1024 };
+
+static void
+entry_prologue_body(codeblock_t *cb, const rb_iseq_t *iseq)
 {
-    RUBY_ASSERT(cb != NULL);
-
-    if (cb->write_pos + 1024 >= cb->mem_size) {
-        rb_bug("out of executable memory");
-    }
-
-    // Align the current write positon to cache line boundaries
-    cb_align_pos(cb, 64);
-
-    uint8_t *code_ptr = cb_get_ptr(cb, cb->write_pos);
     ADD_COMMENT(cb, "yjit entry");
 
     push(cb, REG_CFP);
@@ -580,6 +568,33 @@ yjit_entry_prologue(codeblock_t *cb, const rb_iseq_t *iseq)
     if (iseq->body->param.flags.has_opt) {
         yjit_pc_guard(cb, iseq);
     }
+}
+
+/*
+Compile an interpreter entry block to be inserted into an iseq
+Returns `NULL` if compilation fails.
+*/
+static uint8_t *
+yjit_entry_prologue(codeblock_t *cb, const rb_iseq_t *iseq)
+{
+    RUBY_ASSERT(cb != NULL);
+
+    // Check if we have enough executable memory
+    if (cb->write_pos + MAX_PROLOGUE_SIZE >= cb->mem_size) {
+        return NULL;
+    }
+
+    const uint32_t old_write_pos = cb->write_pos;
+
+    // Align the current write positon to cache line boundaries
+    cb_align_pos(cb, 64);
+
+    // Generate the prologue
+    uint8_t *code_ptr = cb_get_ptr(cb, cb->write_pos);
+    entry_prologue_body(cb, iseq);
+
+    // Verify MAX_PROLOGUE_SIZE
+    RUBY_ASSERT_ALWAYS(cb->write_pos - old_write_pos <= MAX_PROLOGUE_SIZE);
 
     return code_ptr;
 }
@@ -3442,7 +3457,6 @@ gen_send_cfunc(jitstate_t *jit, ctx_t *ctx, const struct rb_callinfo *ci, const 
         uint32_t block_param_with_jit_frame_setup = cb_new_label(cb, "block_param_with_jit_frame_setup");
         uint32_t yikes_not_fixnum = cb_new_label(cb, "yikes");
 
-
         mov(cb, REG0, ctx_sp_opnd(ctx, 0)); // you might be tempted to use `recv`, but it's invalid here because we did save_sp above.
 
         // Bail in case of large integers.
@@ -3465,10 +3479,14 @@ gen_send_cfunc(jitstate_t *jit, ctx_t *ctx, const struct rb_callinfo *ci, const 
         cmp(cb, REG1, REG0);
         jge_label(cb, integer_times_return);
 
-        // Setup CFP
-
+        // Preserve loop bound and counter
+        push(cb, REG0);
+        push(cb, REG1);
         // Call YJIT code for the blocok parameter
         call_label(cb, block_param_with_jit_frame_setup);
+        // Restore loop bound and counter
+        pop(cb, REG1);
+        pop(cb, REG0);
 
         add(cb, REG1, imm_opnd(1));
         jmp_label(cb, integer_times_loop);
@@ -3476,7 +3494,27 @@ gen_send_cfunc(jitstate_t *jit, ctx_t *ctx, const struct rb_callinfo *ci, const 
 
         // blindspot(Alan): not sure if I need to clear local types here. Failing to come up with examples that prove or disprove.
         cb_write_label(cb, yikes_not_fixnum);
-        cb_write_byte(cb, 0x06); // PUSH ES. In long mode this raises #UD, just like UD2.
+        int3(cb);
+        // cb_write_byte(cb, 0x06); // PUSH ES. In long mode this raises #UD, just like UD2. TODO: this trips up LLDB's disassembler
+
+        cb_write_label(cb, block_param_with_jit_frame_setup);
+
+        // Start by setting up a new JIT frame. We reuse the prologue code, so
+        // settup argument register as if we are being called from the interpreter.
+        // Our signature is:
+        // VALUE (*jit_func)(struct rb_execution_context_struct *,
+        //                   struct rb_control_frame_struct *);
+        mov(cb, C_ARG_REGS[0], REG_EC);
+        // FIXME: this is wrong. What we actually need to pass here is the frame
+        // for the block, but we are passing to frame for Integer#times at the moment.
+        mov(cb, C_ARG_REGS[1], member_opnd(REG_EC, rb_execution_context_t, cfp));
+        entry_prologue_body(cb, block);
+        // TODO: we could propagate some type info into the context for the block
+        // NOTE: starting at 0 for the iseq of the block because we ruled out
+        // the block taking optional arguments.
+        // TODO: test for the case where the block takes 1 optional argument
+        gen_jump_to_stub(jit, &DEFAULT_CTX, (blockid_t){ .iseq = block, .idx = 0 });
+
 
         cb_write_label(cb, integer_times_return);
 

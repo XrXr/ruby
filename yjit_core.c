@@ -1031,6 +1031,24 @@ gen_jump_branch(codeblock_t *cb, uint8_t *target0, uint8_t *target1, uint8_t sha
     }
 }
 
+// Generate an unconditional jump to a stub
+static void
+gen_jump_to_stub(jitstate_t *jit, const ctx_t *ctx, blockid_t target0)
+{
+    RUBY_ASSERT(target0.iseq != NULL);
+
+    branch_t *branch = make_branch_entry(jit->block, ctx, gen_jump_branch);
+    branch->start_addr = cb_get_write_ptr(cb);
+    // src ctx not used.
+    branch->targets[0] = target0;
+    branch->target_ctxs[0] = *ctx;
+    branch->blocks[0] = find_block_version(target0, ctx);
+    branch->dst_addrs[0] = get_branch_target(branch->targets[0], ctx, branch, 0);
+    branch->shape = SHAPE_DEFAULT;
+
+    regenerate_branch(cb, branch);
+}
+
 static void
 gen_direct_jump(
     jitstate_t *jit,
