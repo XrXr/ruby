@@ -214,7 +214,7 @@ jobs:
         run: >
           ../src/configure -C ${default_configure} ${append_configure}
           ${{ matrix.entry.key == 'crosshost' && '--host="${crosshost}"' || '--with-gcc="${default_cc} ${append_cc}"' }}
-          ${{ matrix.entry.shared || '--enable-shared' }}
+          ${{ matrix.entry.shared || '--enable-shared' }} || cat config.log
       - run: make extract-extlibs
       - run: make incs
       - run: make
