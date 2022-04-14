@@ -225,7 +225,7 @@ jobs:
       - run: make incs
       - run: make
       - run: make leaked-globals
-      - run: make test
+        # - run: make test
       - run: make iseq.i
       - run: make install
         if: ${{ matrix.entry.check }}
@@ -237,11 +237,12 @@ jobs:
         if: ${{ matrix.entry.check }}
       - run: make test-spec
         if: ${{ matrix.entry.check }}
-      - name: Upload iseq.i
-        uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3
         with:
           name: iseq.i
-          path: iseq.i
+          path: |
+            build/iseq.i
+            src/iseq.i
       - uses: k0kubun/action-slack@v2.0.0
         with:
           payload: |
