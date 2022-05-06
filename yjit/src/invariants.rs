@@ -577,9 +577,6 @@ pub extern "C" fn rb_yjit_tracing_invalidate_all() {
         );
         CodegenGlobals::set_inline_frozen_bytes(old_pos);
 
-        CodegenGlobals::get_outlined_cb()
-            .unwrap()
-            .mark_all_executable();
-        cb.mark_all_executable();
+        cb.get_code_buffer().mark_all_executable();
     });
 }

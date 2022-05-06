@@ -1,6 +1,7 @@
 use crate::asm::x86_64::*;
 use crate::asm::*;
 use crate::codegen::*;
+use crate::mm::CodePtr;
 use crate::cruby::*;
 use crate::options::*;
 use crate::stats::*;
@@ -9,7 +10,6 @@ use core::ffi::c_void;
 use std::cell::*;
 use std::hash::{Hash, Hasher};
 use std::mem;
-use std::mem::size_of;
 use std::rc::{Rc};
 use InsnOpnd::*;
 use TempMapping::*;
@@ -547,6 +547,7 @@ pub extern "C" fn rb_yjit_iseq_update_references(payload: *mut c_void) {
 
     // For updating VALUEs written into the inline code block.
     let cb = CodegenGlobals::get_inline_cb();
+    let code_buffer = cb.get_code_buffer();
 
     for versions in &payload.version_map {
         for block in versions {
@@ -573,37 +574,29 @@ pub extern "C" fn rb_yjit_iseq_update_references(payload: *mut c_void) {
             // Walk over references to objects in generated code.
             for offset in &block.gc_object_offsets {
                 let offset_to_value = offset.as_usize();
-                let value_address: *const u8 = cb.get_ptr(offset_to_value).raw_ptr();
+                let value_code_ptr = cb.get_ptr(offset_to_value);
+                let value_ptr: *const u8 = value_code_ptr.raw_ptr();
                 // Creating an unaligned pointer is well defined unlike in C.
-                let value_address = value_address as *mut VALUE;
+                let value_ptr = value_ptr as *mut VALUE;
 
                 // SAFETY: these point to YJIT's code buffer
-                let object = unsafe { value_address.read_unaligned() };
+                let object = unsafe { value_ptr.read_unaligned() };
                 let new_addr = unsafe { rb_gc_location(object) };
 
-                // Only write when the VALUE moves, to be CoW friendly.
+                // Only write when the VALUE moves, to be copy-on-write friendly.
                 if new_addr != object {
-                    // Possibly unlock the page we need to update
-                    cb.mark_position_writable(offset_to_value);
-
-                    // Object could cross a page boundary, so unlock there as well
-                    cb.mark_position_writable(offset_to_value + size_of::<VALUE>() - 1);
-
-                    // SAFETY: we just made this address writable
-                    unsafe { value_address.write_unaligned(new_addr) };
+                    for (byte_idx, &byte) in new_addr.as_u64().to_le_bytes().iter().enumerate() {
+                        let byte_code_ptr = value_code_ptr.add_bytes(byte_idx);
+                        code_buffer.write_byte(byte_code_ptr, byte)
+                            .expect("patching existing code should be in-bound");
+                    }
                 }
             }
         }
     }
 
     // Note that we would have returned already if YJIT is off.
-    cb.mark_all_executable();
-
-    // I guess we need to make the outlined block executable as well because
-    // we don't split the two at exact page boundaries.
-    CodegenGlobals::get_outlined_cb()
-        .unwrap()
-        .mark_all_executable();
+    code_buffer.mark_all_executable();
 }
 
 /// Get all blocks for a particular place in an iseq.
@@ -1392,8 +1385,7 @@ pub fn gen_entry_point(iseq: IseqPtr, ec: EcPtr) -> Option<CodePtr> {
     // Try to generate code for the entry block
     let block = gen_block_series(blockid, &Context::default(), ec, cb, ocb);
 
-    cb.mark_all_executable();
-    ocb.unwrap().mark_all_executable();
+    cb.get_code_buffer().mark_all_executable();
 
     match block {
         // Compilation failed
@@ -1641,8 +1633,7 @@ fn branch_stub_hit_body(branch_ptr: *const c_void, target_idx: u32, ec: EcPtr) -
         }
     };
 
-    ocb.unwrap().mark_all_executable();
-    cb.mark_all_executable();
+    cb.get_code_buffer().mark_all_executable();
 
     let new_branch_size = branch.code_size();
     assert!(
@@ -2019,8 +2010,7 @@ pub fn invalidate_block_version(blockref: &BlockRef) {
 
     free_block(blockref);
 
-    ocb.unwrap().mark_all_executable();
-    cb.mark_all_executable();
+    cb.get_code_buffer().mark_all_executable();
 
     incr_counter!(invalidation_count);
 }

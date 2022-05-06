@@ -21,6 +21,8 @@ use std::os::raw::c_uint;
 use std::ptr;
 use std::slice;
 
+pub use crate::mm::CodePtr;
+
 // Callee-saved registers
 pub const REG_CFP: X86Opnd = R13;
 pub const REG_EC: X86Opnd = R12;
@@ -5974,14 +5976,19 @@ impl CodegenGlobals {
         let mem_size = get_option!(exec_mem_size) * 1024 * 1024;
 
         #[cfg(not(test))]
-        let (mut cb, mut ocb) = {
-            let page_size = unsafe { rb_yjit_get_page_size() }.as_usize();
-            let mem_block: *mut u8 = unsafe { alloc_exec_mem(mem_size.try_into().unwrap()) };
-            let cb = CodeBlock::new(mem_block, mem_size / 2, page_size);
+        let (cb, mut ocb) = {
+            // TODO(alan): we can error more gracefully when the user gives
+            //   --yjit-exec-mem=absurdly-large-number
+            let code_buffer = crate::mm::CodeBuffer::new(mem_size.try_into().unwrap())
+                .unwrap();
+            let code_buffer = std::rc::Rc::new(code_buffer);
+            let mem_block = code_buffer.start_ptr();
+
+            let cb = CodeBlock::new(code_buffer.clone(), mem_block, mem_size / 2);
             let ocb = OutlinedCb::wrap(CodeBlock::new(
-                unsafe { mem_block.add(mem_size / 2) },
+                code_buffer.clone(),
+                mem_block.add_bytes(mem_size / 2),
                 mem_size / 2,
-                page_size,
             ));
             (cb, ocb)
         };
@@ -5989,7 +5996,7 @@ impl CodegenGlobals {
         // In test mode we're not linking with the C code
         // so we don't allocate executable memory
         #[cfg(test)]
-        let mut cb = CodeBlock::new_dummy(mem_size / 2);
+        let cb = CodeBlock::new_dummy(mem_size / 2);
         #[cfg(test)]
         let mut ocb = OutlinedCb::wrap(CodeBlock::new_dummy(mem_size / 2));
 
@@ -6001,8 +6008,7 @@ impl CodegenGlobals {
         let cfunc_exit_code = gen_full_cfunc_return(&mut ocb);
 
         // Mark all code memory as executable
-        cb.mark_all_executable();
-        ocb.unwrap().mark_all_executable();
+        cb.get_code_buffer().mark_all_executable();
 
         let mut codegen_globals = CodegenGlobals {
             inline_cb: cb,

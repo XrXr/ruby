@@ -1,50 +1,18 @@
 use std::mem;
+use std::rc::Rc;
 
 #[cfg(feature = "asm_comments")]
 use std::collections::BTreeMap;
+
+use crate::mm::{CodeBuffer, CodePtr};
 
 // Lots of manual vertical alignment in there that rustfmt doesn't handle well.
 #[rustfmt::skip]
 pub mod x86_64;
 
-/// Pointer to a piece of machine code
-/// We may later change this to wrap an u32
-/// Note: there is no NULL constant for CodePtr. You should use Option<CodePtr> instead.
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Debug)]
-#[repr(C)]
-pub struct CodePtr(*const u8);
-
-impl CodePtr {
-    pub fn raw_ptr(&self) -> *const u8 {
-        let CodePtr(ptr) = *self;
-        return ptr;
-    }
-
-    fn into_i64(&self) -> i64 {
-        let CodePtr(ptr) = self;
-        *ptr as i64
-    }
-
-    #[allow(unused)]
-    fn into_usize(&self) -> usize {
-        let CodePtr(ptr) = self;
-        *ptr as usize
-    }
-}
-
-impl From<*mut u8> for CodePtr {
-    fn from(value: *mut u8) -> Self {
-        assert!(value as usize != 0);
-        return CodePtr(value);
-    }
-}
-
 //
 // TODO: need a field_size_of macro, to compute the size of a struct field in bytes
 //
-
-// 1 is not aligned so this won't match any pages
-const ALIGNED_WRITE_POSITION_NONE: usize = 1;
 
 /// Reference to an ASM label
 struct LabelRef {
@@ -55,15 +23,14 @@ struct LabelRef {
     label_idx: usize,
 }
 
-/// Block of memory into which instructions can be assembled
+/// Block of memory into which instructions can be assembled.
+/// It's a slice of the process's [CodeBuffer].
 pub struct CodeBlock {
-    // Block of non-executable memory used for dummy code blocks
-    // This memory is owned by this block and lives as long as the block
-    #[allow(unused)]
-    dummy_block: Vec<u8>,
+    // Shared ownership for the process's CodeBuffer
+    code_buffer: Rc<CodeBuffer>,
 
-    // Pointer to memory we are writing into
-    mem_block: *mut u8,
+    // Pointer to memory we are writing into derived from the CodeBuffer
+    mem_block: CodePtr,
 
     // Memory block size
     mem_size: usize,
@@ -84,14 +51,6 @@ pub struct CodeBlock {
     #[cfg(feature = "asm_comments")]
     asm_comments: BTreeMap<usize, Vec<String>>,
 
-    // Keep track of the current aligned write position.
-    // Used for changing protection when writing to the JIT buffer
-    current_aligned_write_pos: usize,
-
-    // Memory protection works at page granularity and this is the
-    // the size of each page. Used to implement W^X.
-    page_size: usize,
-
     // Set if the CodeBlock is unable to output some instructions,
     // for example, when there is not enough space or when a jump
     // target is too far away.
@@ -99,47 +58,24 @@ pub struct CodeBlock {
 }
 
 impl CodeBlock {
-    #[cfg(test)]
-    pub fn new_dummy(mem_size: usize) -> Self {
-        // Allocate some non-executable memory
-        let mut dummy_block = vec![0; mem_size];
-        let mem_ptr = dummy_block.as_mut_ptr();
-
+    /// Make a new CodeBlock. [mem_block] points inside [code_buffer].
+    pub fn new(code_buffer: Rc<CodeBuffer>, mem_block: CodePtr, mem_size: usize) -> Self {
+        // TODO(alan): check that mem_block points to content of CodeBuffer.
         Self {
-            dummy_block: dummy_block,
-            mem_block: mem_ptr,
-            mem_size: mem_size,
+            code_buffer,
+            mem_block,
+            mem_size,
             write_pos: 0,
             label_addrs: Vec::new(),
             label_names: Vec::new(),
             label_refs: Vec::new(),
             #[cfg(feature = "asm_comments")]
             asm_comments: BTreeMap::new(),
-            current_aligned_write_pos: ALIGNED_WRITE_POSITION_NONE,
-            page_size: 4096,
             dropped_bytes: false,
         }
     }
 
-    #[cfg(not(test))]
-    pub fn new(mem_block: *mut u8, mem_size: usize, page_size: usize) -> Self {
-        Self {
-            dummy_block: vec![0; 0],
-            mem_block: mem_block,
-            mem_size: mem_size,
-            write_pos: 0,
-            label_addrs: Vec::new(),
-            label_names: Vec::new(),
-            label_refs: Vec::new(),
-            #[cfg(feature = "asm_comments")]
-            asm_comments: BTreeMap::new(),
-            current_aligned_write_pos: ALIGNED_WRITE_POSITION_NONE,
-            page_size,
-            dropped_bytes: false,
-        }
-    }
-
-    // Check if this code block has sufficient remaining capacity
+    /// Check if this code block has sufficient remaining capacity
     pub fn has_capacity(&self, num_bytes: usize) -> bool {
         self.write_pos + num_bytes < self.mem_size
     }
@@ -175,6 +111,10 @@ impl CodeBlock {
         self.write_pos
     }
 
+    pub fn get_code_buffer(&self) -> &CodeBuffer {
+        self.code_buffer.as_ref()
+    }
+
     // Set the current write position
     pub fn set_pos(&mut self, pos: usize) {
         // Assert here since while CodeBlock functions do bounds checking, there is
@@ -204,16 +144,13 @@ impl CodeBlock {
 
     // Set the current write position from a pointer
     pub fn set_write_ptr(&mut self, code_ptr: CodePtr) {
-        let pos = (code_ptr.raw_ptr() as usize) - (self.mem_block as usize);
+        let pos = code_ptr.into_usize() - self.mem_block.into_usize();
         self.set_pos(pos);
     }
 
     // Get a direct pointer into the executable memory block
     pub fn get_ptr(&self, offset: usize) -> CodePtr {
-        unsafe {
-            let ptr = self.mem_block.add(offset);
-            CodePtr(ptr)
-        }
+        self.mem_block.add_bytes(offset)
     }
 
     // Get a direct pointer to the current write position
@@ -224,12 +161,13 @@ impl CodeBlock {
     // Write a single byte at the current position
     pub fn write_byte(&mut self, byte: u8) {
         if self.write_pos < self.mem_size {
-            self.mark_position_writable(self.write_pos);
-            unsafe { self.mem_block.add(self.write_pos).write(byte) };
-            self.write_pos += 1;
-        } else {
-            self.dropped_bytes = true;
+            let write_ptr = self.get_write_ptr();
+            if self.code_buffer.write_byte(write_ptr, byte).is_ok() {
+                self.write_pos += 1;
+                return;
+            }
         }
+        self.dropped_bytes = true;
     }
 
     // Write multiple bytes starting from the current position
@@ -327,34 +265,23 @@ impl CodeBlock {
         self.label_names.clear();
         assert!(self.label_refs.is_empty());
     }
+}
 
-    pub fn mark_position_writable(&mut self, write_pos: usize) {
-        let page_size = self.page_size;
-        let aligned_position = (write_pos / page_size) * page_size;
+#[cfg(test)]
+impl CodeBlock {
+    /// Stubbed CodeBlock for testing. Can't execute generated code.
+    pub fn new_dummy(mem_size: usize) -> Self {
+        use crate::utils::IntoUsize;
 
-        if self.current_aligned_write_pos != aligned_position {
-            self.current_aligned_write_pos = aligned_position;
+        let mem_size: u32 = mem_size.try_into().unwrap();
+        let code_buffer = crate::mm::CodeBuffer::new(mem_size);
+        let code_buffer_start = code_buffer.start_ptr();
 
-            #[cfg(not(test))]
-            unsafe {
-                use core::ffi::c_void;
-                let page_ptr = self.get_ptr(aligned_position).raw_ptr() as *mut c_void;
-                crate::cruby::rb_yjit_mark_writable(page_ptr, page_size.try_into().unwrap());
-            }
-        }
-    }
-
-    pub fn mark_all_executable(&mut self) {
-        self.current_aligned_write_pos = ALIGNED_WRITE_POSITION_NONE;
-
-        #[cfg(not(test))]
-        unsafe {
-            use core::ffi::c_void;
-            // NOTE(alan): Right now we do allocate one big chunck and give the top half to the outlined codeblock
-            // The start of the top half of the region isn't necessarily a page boundary...
-            let cb_start = self.get_ptr(0).raw_ptr() as *mut c_void;
-            crate::cruby::rb_yjit_mark_executable(cb_start, self.mem_size.try_into().unwrap());
-        }
+        Self::new(
+            Rc::new(code_buffer),
+            code_buffer_start,
+            mem_size.as_usize(),
+        )
     }
 }
 
