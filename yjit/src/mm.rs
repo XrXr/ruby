@@ -207,14 +207,28 @@ impl CodeBuffer {
                 }
 
                 // Adjust markers in `mapped_ranges` Add a single new page at `page_idx`
-                //
-                // ... insert a `PageOnwards::Mapped` at `page_idx` to start the range
-                let at_page_idx = mapped_ranges.insert(page_idx, PageOnwards::Mapped);
-                assert_eq!(
-                    false,
-                    matches!(at_page_idx, Some(PageOnwards::Mapped)),
-                    "initial lookup should catch this",
-                );
+                match mapped_ranges.entry(page_idx) {
+                    Vacant(at_idx) => {
+                        at_idx.insert(PageOnwards::Mapped);
+                    }
+                    Occupied(at_idx) => {
+                        match at_idx.get() {
+                            PageOnwards::Mapped => { unreachable!("initial lookup should have caught this"); }
+                            PageOnwards::NotMapped => {
+                                // in this case we need to look at the marker before idx to make
+                                // sure we don't have too many ranges.
+                                //
+                                // When marker before page_idx starts a range, we don't need to
+                                // start a new one. Extend it by removing this NotMapped.
+                                if let Some((_, PageOnwards::Mapped)) = mapped_ranges.range(..page_idx).next_back() {
+                                    mapped_ranges.remove(&page_idx);
+                                } else {
+                                    mapped_ranges.insert(page_idx, PageOnwards::Mapped);
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // ... adjust adjacent marker so we're adding exactly one page
                 use std::collections::btree_map::Entry::*;
