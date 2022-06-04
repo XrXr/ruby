@@ -3823,9 +3823,10 @@ fn gen_send_cfunc(
     }
     mov(cb, mem_opnd(64, REG0, 8 * -1), uimm_opnd(frame_type.into()));
 
-    // Allocate a new CFP (ec->cfp--)
+    // REG1 = pointer to new control frame (ec->cfp-1)
     let ec_cfp_opnd = mem_opnd(64, REG_EC, RUBY_OFFSET_EC_CFP);
-    sub(cb, ec_cfp_opnd, uimm_opnd(RUBY_SIZEOF_CONTROL_FRAME as u64));
+    mov(cb, REG1, ec_cfp_opnd);
+    sub(cb, REG1, uimm_opnd(RUBY_SIZEOF_CONTROL_FRAME as u64));
 
     // Setup the new frame
     // *cfp = (const struct rb_control_frame_struct) {
@@ -3837,10 +3838,6 @@ fn gen_send_cfunc(
     //    .block_code = 0,
     //    .__bp__     = sp,
     // };
-
-    // Can we re-use ec_cfp_opnd from above?
-    let ec_cfp_opnd = mem_opnd(64, REG_EC, RUBY_OFFSET_EC_CFP);
-    mov(cb, REG1, ec_cfp_opnd);
     mov(cb, mem_opnd(64, REG1, RUBY_OFFSET_CFP_PC), imm_opnd(0));
 
     mov(cb, mem_opnd(64, REG1, RUBY_OFFSET_CFP_SP), REG0);
@@ -3855,6 +3852,10 @@ fn gen_send_cfunc(
     mov(cb, mem_opnd(64, REG1, RUBY_OFFSET_CFP_EP), REG0);
     mov(cb, REG0, recv);
     mov(cb, mem_opnd(64, REG1, RUBY_OFFSET_CFP_SELF), REG0);
+
+    // Publish the new frame _after_ initialization since profilers could
+    // inspect the stack in a timer signal that arrives in code above.
+    mov(cb, ec_cfp_opnd, REG1);
 
     /*
     // Verify that we are calling the right function
@@ -4408,7 +4409,6 @@ fn gen_send_iseq(
     add_comment(cb, "push callee CFP");
     // Allocate a new CFP (ec->cfp--)
     sub(cb, REG_CFP, uimm_opnd(RUBY_SIZEOF_CONTROL_FRAME as u64));
-    mov(cb, mem_opnd(64, REG_EC, RUBY_OFFSET_EC_CFP), REG_CFP);
 
     // Setup the new frame
     // *cfp = (const struct rb_control_frame_struct) {
@@ -4435,10 +4435,17 @@ fn gen_send_iseq(
         imm_opnd(0),
     );
 
-    // No need to set cfp->pc since the callee sets it whenever calling into routines
-    // that could look at it through jit_save_pc().
-    // mov(cb, REG0, const_ptr_opnd(start_pc));
-    // mov(cb, member_opnd(REG_CFP, rb_control_frame_t, pc), REG0);
+    // Normally there is no need to set cfp->pc since the callee sets it
+    // whenever calling into routines that could observe the PC, however,
+    // StackProf can look at the PC from a timer signal, which can arrive
+    // _at any time_.
+    // 
+    // So we set the pc and do extra work so StackProf doesn't crash us.
+    let start_pc = unsafe { rb_iseq_pc_at_idx(iseq, start_pc_offset) };
+    mov(cb, REG0, const_ptr_opnd(start_pc.cast()));
+    mov(cb, mem_opnd(64, REG_CFP, RUBY_OFFSET_CFP_PC), REG0);
+    // Similarly, publish new frame after initialization so StackProf doesn't crash us.
+    mov(cb, mem_opnd(64, REG_EC, RUBY_OFFSET_EC_CFP), REG_CFP);
 
     // Stub so we can return to JITted code
     let return_block = BlockId {
