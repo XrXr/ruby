@@ -848,8 +848,8 @@ pub fn limit_block_versions(blockid: BlockId, ctx: &Context) -> Context {
         let mut generic_ctx = Context::default();
         generic_ctx.stack_size = ctx.stack_size;
         generic_ctx.sp_offset = ctx.sp_offset;
+        generic_ctx.frame_setup = ctx.frame_setup;
 
-        // Mutate the incoming context
         return generic_ctx;
     }
 
