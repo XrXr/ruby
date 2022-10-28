@@ -388,12 +388,7 @@ fn gen_code_for_exit_from_stub(ocb: &mut OutlinedCb) -> CodePtr {
     gen_counter_incr!(asm, exit_from_branch_stub);
 
     asm.comment("exit from branch stub");
-    asm.cpop_into(SP);
-    asm.cpop_into(EC);
-    asm.cpop_into(CFP);
-
     asm.frame_teardown();
-
     asm.cret(Qundef.into());
 
     asm.compile(ocb);
@@ -439,12 +434,7 @@ fn gen_exit(exit_pc: *mut VALUE, ctx: &Context, asm: &mut Assembler) {
         }
     }
 
-    asm.cpop_into(SP);
-    asm.cpop_into(EC);
-    asm.cpop_into(CFP);
-
     asm.frame_teardown();
-
     asm.cret(Qundef.into());
 }
 
@@ -525,41 +515,8 @@ fn gen_full_cfunc_return(ocb: &mut OutlinedCb) -> CodePtr {
     gen_counter_incr!(asm, traced_cfunc_return);
 
     // Return to the interpreter
-    asm.cpop_into(SP);
-    asm.cpop_into(EC);
-    asm.cpop_into(CFP);
-
     asm.frame_teardown();
-
     asm.cret(Qundef.into());
-
-    asm.compile(ocb);
-
-    return code_ptr;
-}
-
-/// Generate a continuation for leave that exits to the interpreter at REG_CFP->pc.
-/// This is used by gen_leave() and gen_entry_prologue()
-fn gen_leave_exit(ocb: &mut OutlinedCb) -> CodePtr {
-    let ocb = ocb.unwrap();
-    let code_ptr = ocb.get_write_ptr();
-    let mut asm = Assembler::new();
-
-    // gen_leave() fully reconstructs interpreter state and leaves the
-    // return value in C_RET_OPND before coming here.
-    let ret_opnd = asm.live_reg_opnd(C_RET_OPND);
-
-    // Every exit to the interpreter should be counted
-    gen_counter_incr!(asm, leave_interp_return);
-
-    asm.comment("exit from leave");
-    asm.cpop_into(SP);
-    asm.cpop_into(EC);
-    asm.cpop_into(CFP);
-
-    asm.frame_teardown();
-
-    asm.cret(ret_opnd);
 
     asm.compile(ocb);
 
@@ -587,9 +544,7 @@ fn gen_pc_guard(asm: &mut Assembler, iseq: IseqPtr, insn_idx: u32) {
     asm.cpop_into(SP);
     asm.cpop_into(EC);
     asm.cpop_into(CFP);
-
     asm.frame_teardown();
-
     asm.cret(Qundef.into());
 
     // PC should match the expected insn_idx
@@ -598,7 +553,7 @@ fn gen_pc_guard(asm: &mut Assembler, iseq: IseqPtr, insn_idx: u32) {
 
 /// Compile an interpreter entry block to be inserted into an iseq
 /// Returns None if compilation fails.
-pub fn gen_entry_prologue(cb: &mut CodeBlock, iseq: IseqPtr, insn_idx: u32) -> Option<CodePtr> {
+pub fn gen_entry_prologue(cb: &mut CodeBlock, iseq: IseqPtr, insn_idx: u32, block: BlockRef) -> Option<CodePtr> {
     let code_ptr = cb.get_write_ptr();
 
     let mut asm = Assembler::new();
@@ -622,12 +577,6 @@ pub fn gen_entry_prologue(cb: &mut CodeBlock, iseq: IseqPtr, insn_idx: u32) -> O
     // Load the current SP from the CFP into REG_SP
     asm.mov(SP, Opnd::mem(64, CFP, RUBY_OFFSET_CFP_SP));
 
-    // Setup cfp->jit_return
-    asm.mov(
-        Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_RETURN),
-        Opnd::const_ptr(CodegenGlobals::get_leave_exit_code().raw_ptr()),
-    );
-
     // We're compiling iseqs that we *expect* to start at `insn_idx`. But in
     // the case of optional parameters, the interpreter can set the pc to a
     // different location depending on the optional parameters.  If an iseq
@@ -637,6 +586,21 @@ pub fn gen_entry_prologue(cb: &mut CodeBlock, iseq: IseqPtr, insn_idx: u32) -> O
     if unsafe { get_iseq_flags_has_opt(iseq) } {
         gen_pc_guard(&mut asm, iseq, insn_idx);
     }
+
+    asm.ccall(block.borrow().get_start_addr().unwrap().raw_ptr(), vec![]);
+
+    // Preserve the return register until we return.
+    let ret_opnd = asm.live_reg_opnd(C_RET_OPND);
+
+    // Every exit to the interpreter should be counted
+    gen_counter_incr!(asm, leave_interp_return);
+
+    asm.comment("return to interpreter");
+    asm.cpop_into(SP);
+    asm.cpop_into(EC);
+    asm.cpop_into(CFP);
+    asm.frame_teardown();
+    asm.cret(ret_opnd);
 
     asm.compile(cb);
 
@@ -741,8 +705,13 @@ pub fn gen_single_block(
         asm.comment(&format!("Block: {} (ISEQ offset: {})", iseq_get_location(blockid.iseq), blockid.idx));
     }
 
+    // Put frame setup code if requested
+    if ctx.get_frame_setup() {
+        asm.frame_setup();
+        ctx.set_frame_setup(false);
+    }
+
     // For each instruction to compile
-    // NOTE: could rewrite this loop with a std::iter::Iterator
     while insn_idx < iseq_size {
         // Get the current pc and opcode
         let pc = unsafe { rb_iseq_pc_at_idx(iseq, insn_idx) };
@@ -4398,22 +4367,6 @@ fn gen_send_cfunc(
     EndBlock
 }
 
-fn gen_return_branch(
-    asm: &mut Assembler,
-    target0: CodePtr,
-    _target1: Option<CodePtr>,
-    shape: BranchShape,
-) {
-    match shape {
-        BranchShape::Next0 | BranchShape::Next1 => unreachable!(),
-        BranchShape::Default => {
-            asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_RETURN), Opnd::const_ptr(target0.raw_ptr()));
-        }
-    }
-}
-
-
-
 /// Pushes arguments from an array to the stack that are passed with a splat (i.e. *args)
 /// It optimistically compiles to a static size that is the exact number of arguments
 /// needed for the function.
@@ -4540,7 +4493,6 @@ fn gen_send_iseq(
     argc: i32,
 ) -> CodegenStatus {
     let mut argc = argc;
-
 
     // Create a side-exit to fall back to the interpreter
     let side_exit = get_side_exit(jit, ocb, ctx);
@@ -5042,14 +4994,9 @@ fn gen_send_iseq(
     // mov(cb, REG0, const_ptr_opnd(start_pc));
     // mov(cb, member_opnd(REG_CFP, rb_control_frame_t, pc), REG0);
 
-    // Stub so we can return to JITted code
-    let return_block = BlockId {
-        iseq: jit.iseq,
-        idx: jit_next_insn_idx(jit),
-    };
-
     // Create a context for the callee
-    let mut callee_ctx = Context::new(); // Was DEFAULT_CTX
+    let mut callee_ctx = Context::default();
+    callee_ctx.set_frame_setup(true);
 
     // Set the argument types in the callee's context
     for arg_idx in 0..argc {
@@ -5061,45 +5008,43 @@ fn gen_send_iseq(
     let recv_type = ctx.get_opnd_type(StackOpnd(argc.try_into().unwrap()));
     callee_ctx.upgrade_opnd_type(SelfOpnd, recv_type);
 
+    // Call the callee
+    let callee_id = BlockId { iseq, idx: start_pc_offset };
+    gen_branch(jit, ctx, asm, ocb, callee_id, &callee_ctx, None, None, gen_call_iseq);
+    fn gen_call_iseq(
+        asm: &mut Assembler,
+        target0: CodePtr,
+        _target1: Option<CodePtr>,
+        shape: BranchShape,
+    ) {
+        match shape {
+            BranchShape::Next0 | BranchShape::Next1 => unreachable!(),
+            BranchShape::Default => {
+                asm.ccall(target0.raw_ptr(), vec![]);
+            }
+        }
+    }
+
+    // Return in case the callee wants to exit to the interpreter
+    let dont_exit = asm.new_label("dont_exit");
+    asm.cmp(C_RET_OPND, Qundef.into());
+    asm.jne(dont_exit);
+    asm.frame_teardown();
+    asm.cret(C_RET_OPND);
+    asm.write_label(dont_exit);
+
     // The callee might change locals through Kernel#binding and other means.
     ctx.clear_local_types();
 
     // Pop arguments and receiver in return context, push the return value
     // After the return, sp_offset will be 1. The codegen for leave writes
     // the return value in case of JIT-to-JIT return.
-    let mut return_ctx = *ctx;
-    return_ctx.stack_pop((argc + 1).try_into().unwrap());
-    return_ctx.stack_push(Type::Unknown);
-    return_ctx.set_sp_offset(1);
-    return_ctx.reset_chain_depth();
+    ctx.stack_pop((argc + 1).try_into().unwrap());
+    ctx.stack_push(Type::Unknown);
+    ctx.set_sp_offset(1);
+    ctx.reset_chain_depth();
 
-    // Write the JIT return address on the callee frame
-    gen_branch(
-        jit,
-        ctx,
-        asm,
-        ocb,
-        return_block,
-        &return_ctx,
-        Some(return_block),
-        Some(&return_ctx),
-        gen_return_branch,
-    );
-
-    //print_str(cb, "calling Ruby func:");
-    //print_str(cb, rb_id2name(vm_ci_mid(ci)));
-
-    // Directly jump to the entry point of the callee
-    gen_direct_jump(
-        jit,
-        &callee_ctx,
-        BlockId {
-            iseq: iseq,
-            idx: start_pc_offset,
-        },
-        asm,
-    );
-
+    jump_to_next_insn(jit, ctx, asm, ocb);
     EndBlock
 }
 
@@ -5817,18 +5762,13 @@ fn gen_leave(
     // Load the return value
     let retval_opnd = ctx.stack_pop(1);
 
-    // Move the return value into the C return register for gen_leave_exit()
-    asm.mov(C_RET_OPND, retval_opnd);
-
     // Reload REG_SP for the caller and write the return value.
     // Top of the stack is REG_SP[0] since the caller has sp_offset=1.
     asm.mov(SP, Opnd::mem(64, CFP, RUBY_OFFSET_CFP_SP));
-    asm.mov(Opnd::mem(64, SP, 0), C_RET_OPND);
+    asm.mov(Opnd::mem(64, SP, 0), retval_opnd);
 
-    // Jump to the JIT return address on the frame that was just popped
-    let offset_to_jit_return =
-        -(RUBY_SIZEOF_CONTROL_FRAME as i32) + (RUBY_OFFSET_CFP_JIT_RETURN as i32);
-    asm.jmp_opnd(Opnd::mem(64, CFP, offset_to_jit_return));
+    asm.frame_teardown();
+    asm.cret(retval_opnd);
 
     EndBlock
 }
@@ -6589,9 +6529,6 @@ pub struct CodegenGlobals {
     /// Outlined code block (slow path)
     outlined_cb: OutlinedCb,
 
-    /// Code for exiting back to the interpreter from the leave instruction
-    leave_exit_code: CodePtr,
-
     // For exiting from YJIT frame from branch_stub_hit().
     // Filled by gen_code_for_exit_from_stub().
     stub_exit_code: CodePtr,
@@ -6683,7 +6620,6 @@ impl CodegenGlobals {
         let mut ocb = OutlinedCb::wrap(CodeBlock::new_dummy(mem_size / 2));
 
         let ocb_start_addr = ocb.unwrap().get_write_ptr();
-        let leave_exit_code = gen_leave_exit(&mut ocb);
 
         let stub_exit_code = gen_code_for_exit_from_stub(&mut ocb);
 
@@ -6700,7 +6636,6 @@ impl CodegenGlobals {
         let mut codegen_globals = CodegenGlobals {
             inline_cb: cb,
             outlined_cb: ocb,
-            leave_exit_code,
             stub_exit_code: stub_exit_code,
             outline_full_cfunc_return_pos: cfunc_exit_code,
             global_inval_patches: Vec::new(),
@@ -6796,10 +6731,6 @@ impl CodegenGlobals {
     /// Get a mutable reference to the outlined code block
     pub fn get_outlined_cb() -> &'static mut OutlinedCb {
         &mut CodegenGlobals::get_instance().outlined_cb
-    }
-
-    pub fn get_leave_exit_code() -> CodePtr {
-        CodegenGlobals::get_instance().leave_exit_code
     }
 
     pub fn get_stub_exit_code() -> CodePtr {

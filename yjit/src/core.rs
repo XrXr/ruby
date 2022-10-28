@@ -288,6 +288,9 @@ pub struct Context {
     // Depth of this block in the sidechain (eg: inline-cache chain)
     chain_depth: u8,
 
+    // Whether this is sets up a native stack frame (for method calls)
+    frame_setup: bool,
+
     // Local variable types we keep track of
     local_types: [Type; MAX_LOCAL_TYPES],
 
@@ -1010,6 +1013,7 @@ impl Context {
             stack_size: size as u16,
             sp_offset: size,
             chain_depth: 0,
+            frame_setup: false,
             local_types: [Type::Unknown; MAX_LOCAL_TYPES],
             temp_types: [Type::Unknown; MAX_TEMP_TYPES],
             self_type: Type::Unknown,
@@ -1043,6 +1047,14 @@ impl Context {
 
     pub fn increment_chain_depth(&mut self) {
         self.chain_depth += 1;
+    }
+
+    pub fn set_frame_setup(&mut self, frame_setup: bool) {
+        self.frame_setup = frame_setup;
+    }
+
+    pub fn get_frame_setup(&self) -> bool {
+        self.frame_setup
     }
 
     /// Get an operand for the adjusted stack pointer address
@@ -1350,6 +1362,10 @@ impl Context {
             return usize::MAX;
         }
 
+        if dst.frame_setup != src.frame_setup {
+            return usize::MAX;
+        }
+
         // Difference sum
         let mut diff = 0;
 
@@ -1551,11 +1567,11 @@ pub fn gen_entry_point(iseq: IseqPtr, ec: EcPtr) -> Option<CodePtr> {
     let cb = CodegenGlobals::get_inline_cb();
     let ocb = CodegenGlobals::get_outlined_cb();
 
-    // Write the interpreter entry prologue. Might be NULL when out of memory.
-    let code_ptr = gen_entry_prologue(cb, iseq, insn_idx);
-
     // Try to generate code for the entry block
     let block = gen_block_series(blockid, &Context::default(), ec, cb, ocb);
+
+    // Write the interpreter entry prologue.
+    let code_ptr = block.clone().and_then(|blockref| gen_entry_prologue(cb, iseq, insn_idx, blockref));
 
     cb.mark_all_executable();
     ocb.unwrap().mark_all_executable();
