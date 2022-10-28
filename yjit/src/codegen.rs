@@ -587,10 +587,7 @@ pub fn gen_entry_prologue(cb: &mut CodeBlock, iseq: IseqPtr, insn_idx: u32, bloc
         gen_pc_guard(&mut asm, iseq, insn_idx);
     }
 
-    asm.ccall(block.borrow().get_start_addr().unwrap().raw_ptr(), vec![]);
-
-    // Preserve the return register until we return.
-    let ret_opnd = asm.live_reg_opnd(C_RET_OPND);
+    let ret_opnd = asm.ccall(block.borrow().get_start_addr().unwrap().raw_ptr(), vec![]);
 
     // Every exit to the interpreter should be counted
     gen_counter_incr!(asm, leave_interp_return);
@@ -5761,6 +5758,7 @@ fn gen_leave(
 
     // Load the return value
     let retval_opnd = ctx.stack_pop(1);
+    let retval_opnd = asm.load(retval_opnd);
 
     // Reload REG_SP for the caller and write the return value.
     // Top of the stack is REG_SP[0] since the caller has sp_offset=1.

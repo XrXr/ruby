@@ -1568,7 +1568,9 @@ pub fn gen_entry_point(iseq: IseqPtr, ec: EcPtr) -> Option<CodePtr> {
     let ocb = CodegenGlobals::get_outlined_cb();
 
     // Try to generate code for the entry block
-    let block = gen_block_series(blockid, &Context::default(), ec, cb, ocb);
+    let mut entry_ctx = Context::default();
+    entry_ctx.set_frame_setup(true);
+    let block = gen_block_series(blockid, &entry_ctx, ec, cb, ocb);
 
     // Write the interpreter entry prologue.
     let code_ptr = block.clone().and_then(|blockref| gen_entry_prologue(cb, iseq, insn_idx, blockref));
@@ -1905,6 +1907,10 @@ fn get_branch_target(
     let mut asm = Assembler::new();
     asm.comment("branch stub hit");
 
+    if ctx.get_frame_setup() {
+        asm.frame_setup();
+    }
+
     // Call branch_stub_hit(branch_ptr, target_idx, ec)
     let jump_addr = asm.ccall(
         branch_stub_hit as *mut u8,
@@ -1914,6 +1920,10 @@ fn get_branch_target(
             EC,
         ]
     );
+
+    if ctx.get_frame_setup() {
+        asm.frame_teardown();
+    }
 
     // Jump to the address returned by the
     // branch_stub_hit call
