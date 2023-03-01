@@ -2027,7 +2027,7 @@ fn branch_stub_hit_body(branch_ptr: *const c_void, target_idx: u32, ec: EcPtr) -
             // Branch shape should reflect layout
             assert!(!(branch.gen_fn.get_shape() == target_branch_shape && Some(new_block.start_addr) != branch.end_addr));
 
-            if branch.block != block_rc && dbg!(branch.block.borrow().code_size() == 0) && dbg!(branch.code_size() == 0) && {
+            if branch.block != block_rc && dbg!(branch.block.borrow().blockid.idx == branch.block.borrow().end_idx) && {
                     let no_entry_exit = branch.block.borrow().entry_exit.is_none();
                     if !no_entry_exit {
                         dbg!("can't rewire due to entry exit");
@@ -2036,7 +2036,7 @@ fn branch_stub_hit_body(branch_ptr: *const c_void, target_idx: u32, ec: EcPtr) -
                 } {
                 // we have new_block.start_address == branch.block.start_address TODO check it
                 for branch_going_into_block_housing_branch in branch.block.borrow().incoming.iter() {
-                    let target_idx = if branch_going_into_block_housing_branch.borrow().get_target_address(0) == Some(new_block.get_start_addr()) {
+                    let target_idx = if branch_going_into_block_housing_branch.borrow().get_target_address(0) == Some(branch.block.borrow().get_start_addr()) {
                         0
                     } else {
                         1

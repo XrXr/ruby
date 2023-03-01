@@ -25,6 +25,7 @@ pub use crate::virtualmem::CodePtr;
 /// Status returned by code generation functions
 #[derive(PartialEq, Debug)]
 enum CodegenStatus {
+    DeferCompilation, // incomplete. caller still has to call the thing.
     KeepCompiling,
     CantCompile,
     EndBlock,
