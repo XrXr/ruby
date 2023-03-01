@@ -830,6 +830,10 @@ pub fn gen_single_block(
         // first instruction in the block can concern itself with the depth.
         ctx.reset_chain_depth();
 
+        if status == DeferCompilation {
+            break;
+        }
+
         // Move to the next instruction to compile
         insn_idx += insn_len(opcode);
 
@@ -1120,7 +1124,7 @@ fn gen_opt_plus(
         Some(two_fixnums) => two_fixnums,
         None => {
             defer_compilation(jit, ctx, asm, ocb);
-            return EndBlock;
+            return DeferCompilation;
         }
     };
 
@@ -2077,7 +2081,7 @@ fn gen_getinstancevariable(
     // Defer compilation so we can specialize on a runtime `self`
     if !jit.at_current_insn() {
         defer_compilation(jit, ctx, asm, ocb);
-        return EndBlock;
+        return DeferCompilation;
     }
 
     let ivar_name = jit.get_arg(0).as_u64();
@@ -2151,7 +2155,7 @@ fn gen_setinstancevariable(
     // Defer compilation so we can specialize on a runtime `self`
     if !jit.at_current_insn() {
         defer_compilation(jit, ctx, asm, ocb);
-        return EndBlock;
+        return DeferCompilation;
     }
 
     let ivar_name = jit.get_arg(0).as_u64();
@@ -2560,7 +2564,7 @@ fn gen_fixnum_cmp(
         None => {
             // Defer compilation so we can specialize based on a runtime receiver
             defer_compilation(jit, ctx, asm, ocb);
-            return EndBlock;
+            return DeferCompilation;
         }
     };
 
@@ -2760,7 +2764,7 @@ fn gen_opt_eq(
         None => {
             // Defer compilation so we can specialize base on a runtime receiver
             defer_compilation(jit, ctx, asm, ocb);
-            return EndBlock;
+            return DeferCompilation;
         }
     };
 
@@ -2802,7 +2806,7 @@ fn gen_opt_aref(
     // Defer compilation so we can specialize base on a runtime receiver
     if !jit.at_current_insn() {
         defer_compilation(jit, ctx, asm, ocb);
-        return EndBlock;
+        return DeferCompilation;
     }
 
     // Specialize base on compile time values
@@ -2912,7 +2916,7 @@ fn gen_opt_aset(
     // Defer compilation so we can specialize on a runtime `self`
     if !jit.at_current_insn() {
         defer_compilation(jit, ctx, asm, ocb);
-        return EndBlock;
+        return DeferCompilation;
     }
 
     let comptime_recv = jit.peek_at_stack(ctx, 2);
@@ -3024,7 +3028,7 @@ fn gen_opt_and(
         None => {
             // Defer compilation so we can specialize on a runtime `self`
             defer_compilation(jit, ctx, asm, ocb);
-            return EndBlock;
+            return DeferCompilation;
         }
     };
 
@@ -3069,7 +3073,7 @@ fn gen_opt_or(
         None => {
             // Defer compilation so we can specialize on a runtime `self`
             defer_compilation(jit, ctx, asm, ocb);
-            return EndBlock;
+            return DeferCompilation;
         }
     };
 
@@ -3114,7 +3118,7 @@ fn gen_opt_minus(
         None => {
             // Defer compilation so we can specialize on a runtime `self`
             defer_compilation(jit, ctx, asm, ocb);
-            return EndBlock;
+            return DeferCompilation;
         }
     };
 
@@ -3181,7 +3185,7 @@ fn gen_opt_mod(
         None => {
             // Defer compilation so we can specialize on a runtime `self`
             defer_compilation(jit, ctx, asm, ocb);
-            return EndBlock;
+            return DeferCompilation;
         }
     };
 
@@ -3419,7 +3423,7 @@ fn gen_opt_case_dispatch(
     // assumption in the future.
     if !jit.at_current_insn() {
         defer_compilation(jit, ctx, asm, ocb);
-        return EndBlock;
+        return DeferCompilation;
     }
     let starting_context = ctx.clone();
 
@@ -6043,7 +6047,7 @@ fn gen_send_general(
     // Defer compilation so we can specialize on class of receiver
     if !jit.at_current_insn() {
         defer_compilation(jit, ctx, asm, ocb);
-        return EndBlock;
+        return DeferCompilation;
     }
 
     let recv_idx = argc + if flags & VM_CALL_ARGS_BLOCKARG != 0 { 1 } else { 0 };
@@ -6534,7 +6538,7 @@ fn gen_invokeblock(
 ) -> CodegenStatus {
     if !jit.at_current_insn() {
         defer_compilation(jit, ctx, asm, ocb);
-        return EndBlock;
+        return DeferCompilation;
     }
 
     // Get call info
@@ -6684,7 +6688,7 @@ fn gen_invokesuper(
     // Defer compilation so we can specialize on class of receiver
     if !jit.at_current_insn() {
         defer_compilation(jit, ctx, asm, ocb);
-        return EndBlock;
+        return DeferCompilation;
     }
 
     let me = unsafe { rb_vm_frame_method_entry(get_ec_cfp(jit.ec.unwrap())) };
@@ -6928,7 +6932,7 @@ fn gen_objtostring(
 ) -> CodegenStatus {
     if !jit.at_current_insn() {
         defer_compilation(jit, ctx, asm, ocb);
-        return EndBlock;
+        return DeferCompilation;
     }
 
     let recv = ctx.stack_opnd(0);
@@ -7273,7 +7277,7 @@ fn gen_getblockparamproxy(
 ) -> CodegenStatus {
     if !jit.at_current_insn() {
         defer_compilation(jit, ctx, asm, ocb);
-        return EndBlock;
+        return DeferCompilation;
     }
 
     let starting_context = ctx.clone(); // make a copy for use with jit_chain_guard

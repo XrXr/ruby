@@ -2027,7 +2027,7 @@ fn branch_stub_hit_body(branch_ptr: *const c_void, target_idx: u32, ec: EcPtr) -
             // Branch shape should reflect layout
             assert!(!(branch.gen_fn.get_shape() == target_branch_shape && Some(new_block.start_addr) != branch.end_addr));
 
-            if branch.block != block_rc && dbg!(branch.block.borrow().blockid.idx == branch.block.borrow().end_idx) && {
+            if branch.block != block_rc && branch.block.borrow().blockid.idx == branch.block.borrow().end_idx && {
                     let no_entry_exit = branch.block.borrow().entry_exit.is_none();
                     if !no_entry_exit {
                         dbg!("can't rewire due to entry exit");
