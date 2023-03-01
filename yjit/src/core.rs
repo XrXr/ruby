@@ -2022,20 +2022,48 @@ fn branch_stub_hit_body(branch_ptr: *const c_void, target_idx: u32, ec: EcPtr) -
     // Finish building the new block
     let dst_addr = match block {
         Some(block_rc) => {
-            let mut block: RefMut<_> = block_rc.borrow_mut();
+            let mut new_block: RefMut<_> = block_rc.borrow_mut();
 
             // Branch shape should reflect layout
-            assert!(!(branch.gen_fn.get_shape() == target_branch_shape && Some(block.start_addr) != branch.end_addr));
+            assert!(!(branch.gen_fn.get_shape() == target_branch_shape && Some(new_block.start_addr) != branch.end_addr));
 
-            // Add this branch to the list of incoming branches for the target
-            block.push_incoming(branch_rc.clone());
-            mem::drop(block); // end mut borrow
+            if branch.block != block_rc && dbg!(branch.block.borrow().code_size() == 0) && dbg!(branch.code_size() == 0) && {
+                    let no_entry_exit = branch.block.borrow().entry_exit.is_none();
+                    if !no_entry_exit {
+                        dbg!("can't rewire due to entry exit");
+                    }
+                    no_entry_exit
+                } {
+                // we have new_block.start_address == branch.block.start_address TODO check it
+                for branch_going_into_block_housing_branch in branch.block.borrow().incoming.iter() {
+                    let target_idx = if branch_going_into_block_housing_branch.borrow().get_target_address(0) == Some(new_block.get_start_addr()) {
+                        0
+                    } else {
+                        1
+                    };
 
-            // Update the branch target address
-            branch.targets[target_idx] = Some(Box::new(BranchTarget::Block(block_rc.clone())));
+                    // ?do we need to hijack the chain depth
+                    new_block.push_incoming(branch_going_into_block_housing_branch.clone());
+                    branch_going_into_block_housing_branch.borrow_mut().targets[target_idx] = Some(Box::new(BranchTarget::Block(block_rc.clone())));
+                }
+                dbg!("rewired!");
+                let block_housing_branch = branch.block.clone();
+                mem::drop(new_block);
+                mem::drop(branch);
+                free_block(&block_housing_branch);
+                branch = branch_rc.borrow_mut();
+            } else {
+                // Add this branch to the list of incoming branches for the target
+                new_block.push_incoming(branch_rc.clone());
+                mem::drop(new_block); // end mut borrow
 
-            // Rewrite the branch with the new jump target address
-            regenerate_branch(cb, &mut branch);
+                // Update the branch target address
+                branch.targets[target_idx] = Some(Box::new(BranchTarget::Block(block_rc.clone())));
+
+                // Rewrite the branch with the new jump target address
+                regenerate_branch(cb, &mut branch);
+
+            }
 
             // Restore interpreter sp, since the code hitting the stub expects the original.
             unsafe { rb_set_cfp_sp(cfp, original_interp_sp) };
@@ -2273,6 +2301,7 @@ pub fn gen_direct_jump(jit: &mut JITState, ctx: &Context, target0: BlockId, asm:
 }
 
 /// Create a stub to force the code up to this point to be executed
+#[track_caller]
 pub fn defer_compilation(
     jit: &mut JITState,
     cur_ctx: &Context,
@@ -2311,6 +2340,8 @@ pub fn defer_compilation(
 
     // If the block we're deferring from is empty
     if jit.get_block().borrow().get_blockid().idx == jit.get_insn_idx() {
+        use std::panic::Location;
+        //dbg!(Location::caller());
         incr_counter!(defer_empty_count);
     }
 
