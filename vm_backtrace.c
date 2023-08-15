@@ -106,7 +106,7 @@ rb_vm_get_sourceline(const rb_control_frame_t *cfp)
 {
     if (VM_FRAME_RUBYFRAME_P(cfp) && cfp->iseq) {
         const rb_iseq_t *iseq = cfp->iseq;
-        int line = calc_lineno(iseq, cfp->pc);
+        int line = calc_lineno(iseq, CFP_PC(cfp));
         if (line != 0) {
             return line;
         }
@@ -635,13 +635,13 @@ rb_ec_partial_backtrace_object(const rb_execution_context_t *ec, long start_fram
 
     for (; cfp != end_cfp && (bt->backtrace_size < num_frames); cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp)) {
         if (cfp->iseq) {
-            if (cfp->pc) {
+            if (CFP_PC(cfp)) {
                 if (start_frame > 0) {
                     start_frame--;
                 }
                 else if (!skip_internal || !is_internal_location(cfp)) {
                     const rb_iseq_t *iseq = cfp->iseq;
-                    const VALUE *pc = cfp->pc;
+                    const VALUE *pc = CFP_PC(cfp);
                     loc = &bt->backtrace[bt->backtrace_size++];
                     loc->type = LOCATION_TYPE_ISEQ;
                     RB_OBJ_WRITE(btobj, &loc->iseq, iseq);
@@ -672,8 +672,8 @@ rb_ec_partial_backtrace_object(const rb_execution_context_t *ec, long start_fram
 
     if (cfunc_counter > 0) {
         for (; cfp != end_cfp; cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp)) {
-            if (cfp->iseq && cfp->pc && (!skip_internal || !is_internal_location(cfp))) {
-                bt_update_cfunc_loc(cfunc_counter, loc, cfp->iseq, cfp->pc);
+            if (cfp->iseq && CFP_PC(cfp) && (!skip_internal || !is_internal_location(cfp))) {
+                bt_update_cfunc_loc(cfunc_counter, loc, cfp->iseq, CFP_PC(cfp));
                 RB_OBJ_WRITTEN(btobj, Qundef, cfp->iseq);
                 if (do_yield) {
                     bt_yield_loc(loc - cfunc_counter, cfunc_counter, btobj);
@@ -921,7 +921,7 @@ backtrace_each(const rb_execution_context_t *ec,
     for (i=0, cfp = start_cfp; i<size; i++, cfp = RUBY_VM_NEXT_CONTROL_FRAME(cfp)) {
         /* fprintf(stderr, "cfp: %d\n", (rb_control_frame_t *)(ec->vm_stack + ec->vm_stack_size) - cfp); */
         if (cfp->iseq) {
-            if (cfp->pc) {
+            if (CFP_PC(cfp)) {
                 iter_iseq(arg, cfp);
             }
         }
@@ -954,7 +954,7 @@ static void
 oldbt_iter_iseq(void *ptr, const rb_control_frame_t *cfp)
 {
     const rb_iseq_t *iseq = cfp->iseq;
-    const VALUE *pc = cfp->pc;
+    const VALUE *pc = CFP_PC(cfp);
     struct oldbt_arg *arg = (struct oldbt_arg *)ptr;
     VALUE file = arg->filename = rb_iseq_path(iseq);
     VALUE name = ISEQ_BODY(iseq)->location.label;
@@ -1598,7 +1598,7 @@ rb_profile_frames(int start, int limit, VALUE *buff, int *lines)
     end_cfp = RUBY_VM_NEXT_CONTROL_FRAME(end_cfp);
 
     for (i=0; i<limit && cfp != end_cfp;) {
-        if (VM_FRAME_RUBYFRAME_P(cfp) && cfp->pc != 0) {
+        if (VM_FRAME_RUBYFRAME_P(cfp) && CFP_PC(cfp) != 0) {
             if (start > 0) {
                 start--;
                 continue;
@@ -1613,7 +1613,7 @@ rb_profile_frames(int start, int limit, VALUE *buff, int *lines)
                 buff[i] = (VALUE)cfp->iseq;
             }
 
-            if (lines) lines[i] = calc_lineno(cfp->iseq, cfp->pc);
+            if (lines) lines[i] = calc_lineno(cfp->iseq, CFP_PC(cfp));
 
             i++;
         }

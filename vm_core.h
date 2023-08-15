@@ -812,18 +812,34 @@ struct rb_block {
     enum rb_block_type type;
 };
 
+#define CFP_PC(cfp) (cfp->jit_frame ? cfp->jit_frame->pc : cfp->_pc)
+
+typedef struct {
+    VALUE *pc;
+} rb_jit_frame_t;
+
 typedef struct rb_control_frame_struct {
-    const VALUE *pc;        // cfp[0]
-    VALUE *sp;              // cfp[1]
-    const rb_iseq_t *iseq;  // cfp[2]
-    VALUE self;             // cfp[3] / block[0]
-    const VALUE *ep;        // cfp[4] / block[1]
-    const void *block_code; // cfp[5] / block[2] -- iseq, ifunc, or forwarded block handler
-    void *jit_return;       // cfp[6] -- return address for JIT code
+    const VALUE *_pc;          // cfp[0]
+    VALUE *sp;                 // cfp[1]
+    const rb_iseq_t *iseq;     // cfp[2]
+    VALUE self;                // cfp[3] / block[0]
+    const VALUE *ep;           // cfp[4] / block[1]
+    const void *block_code;    // cfp[5] / block[2] -- iseq, ifunc, or forwarded block handler
+    void *jit_return;          // cfp[6] -- return address for JIT code
+    rb_jit_frame_t *jit_frame; // cfp[7]
 #if VM_DEBUG_BP_CHECK
-    VALUE *bp_check;        // cfp[7]
+    VALUE *bp_check;           // cfp[8]
 #endif
 } rb_control_frame_t;
+
+static inline void
+rb_vm_cfp_materialize(rb_control_frame_t *cfp)
+{
+    if (cfp->jit_frame) {
+        cfp->_pc = cfp->jit_frame->pc;
+        cfp->jit_frame = NULL;
+    }
+}
 
 extern const rb_data_type_t ruby_threadptr_data_type;
 

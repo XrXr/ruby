@@ -375,16 +375,17 @@ vm_push_frame(rb_execution_context_t *ec,
 
     /* setup new frame */
     *cfp = (const struct rb_control_frame_struct) {
-        .pc         = pc,
+        ._pc        = pc,
         .sp         = sp,
         .iseq       = iseq,
         .self       = self,
         .ep         = sp - 1,
         .block_code = NULL,
+        .jit_return = NULL,
+        .jit_frame  = NULL,
 #if VM_DEBUG_BP_CHECK
         .bp_check   = sp,
 #endif
-        .jit_return = NULL
     };
 
     ec->cfp = cfp;
@@ -1705,7 +1706,7 @@ vm_throw_start(const rb_execution_context_t *ec, rb_control_frame_t *const reg_c
             while (escape_cfp < eocfp) {
                 if (escape_cfp->ep == ep) {
                     const rb_iseq_t *const iseq = escape_cfp->iseq;
-                    const VALUE epc = escape_cfp->pc - ISEQ_BODY(iseq)->iseq_encoded;
+                    const VALUE epc = CFP_PC(escape_cfp) - ISEQ_BODY(iseq)->iseq_encoded;
                     const struct iseq_catch_table *const ct = ISEQ_BODY(iseq)->catch_table;
                     unsigned int i;
 
@@ -6461,10 +6462,11 @@ vm_trace_hook(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, const VAL
 
     if (event & global_hooks->events) {
         /* increment PC because source line is calculated with PC-1 */
-        reg_cfp->pc++;
+        rb_vm_cfp_materialize(reg_cfp);
+        reg_cfp->_pc++;
         vm_dtrace(event, ec);
         rb_exec_event_hook_orig(ec, global_hooks, event, self, 0, 0, 0 , val, 0);
-        reg_cfp->pc--;
+        reg_cfp->_pc--;
     }
 
     // Load here since global hook above can add and free local hooks
@@ -6472,9 +6474,10 @@ vm_trace_hook(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, const VAL
     if (local_hooks != NULL) {
         if (event & local_hooks->events) {
             /* increment PC because source line is calculated with PC-1 */
-            reg_cfp->pc++;
+            rb_vm_cfp_materialize(reg_cfp);
+            reg_cfp->_pc++;
             rb_exec_event_hook_orig(ec, local_hooks, event, self, 0, 0, 0 , val, 0);
-            reg_cfp->pc--;
+            reg_cfp->_pc--;
         }
     }
 }
@@ -6512,7 +6515,7 @@ rescue_errinfo(rb_execution_context_t *ec, rb_control_frame_t *cfp)
 static void
 vm_trace(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp)
 {
-    const VALUE *pc = reg_cfp->pc;
+    const VALUE *pc = CFP_PC(reg_cfp);
     rb_event_flag_t enabled_flags = ruby_vm_event_flags & ISEQ_TRACE_EVENTS;
     rb_event_flag_t global_events = enabled_flags;
 
@@ -6576,7 +6579,7 @@ vm_trace(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp)
                                   (int)rb_iseq_line_no(iseq, pos),
                                   RSTRING_PTR(rb_iseq_label(iseq)));
             }
-            VM_ASSERT(reg_cfp->pc == pc);
+            VM_ASSERT(CFP_PC(reg_cfp) == pc);
             VM_ASSERT(pc_events != 0);
 
             /* check traces */

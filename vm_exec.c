@@ -77,7 +77,7 @@ vm_exec_core(rb_execution_context_t *ec)
 #define RESTORE_REGS() \
 { \
   VM_REG_CFP = ec->cfp; \
-  reg_pc  = reg_cfp->pc; \
+  reg_pc  = reg_cfp->_pc; \
 }
 
 #undef  VM_REG_PC
@@ -85,7 +85,7 @@ vm_exec_core(rb_execution_context_t *ec)
 #undef  GET_PC
 #define GET_PC() (reg_pc)
 #undef  SET_PC
-#define SET_PC(x) (reg_cfp->pc = VM_REG_PC = (x))
+#define SET_PC(x) (reg_cfp->_pc = VM_REG_PC = (x))
 #endif
 
 #if OPT_TOKEN_THREADED_CODE || OPT_DIRECT_THREADED_CODE
@@ -95,7 +95,7 @@ vm_exec_core(rb_execution_context_t *ec)
     }
 #endif
     reg_cfp = ec->cfp;
-    reg_pc = reg_cfp->pc;
+    reg_pc = reg_cfp->_pc;
 
   first:
     INSN_DISPATCH();

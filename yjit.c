@@ -777,7 +777,7 @@ rb_get_cfp_iseq(struct rb_control_frame_struct *cfp)
 VALUE *
 rb_get_cfp_pc(struct rb_control_frame_struct *cfp)
 {
-    return (VALUE*)cfp->pc;
+    return (VALUE*)CFP_PC(cfp);
 }
 
 VALUE *
@@ -789,7 +789,8 @@ rb_get_cfp_sp(struct rb_control_frame_struct *cfp)
 void
 rb_set_cfp_pc(struct rb_control_frame_struct *cfp, const VALUE *pc)
 {
-    cfp->pc = pc;
+    rb_vm_cfp_materialize(cfp);
+    cfp->_pc = pc;
 }
 
 void
@@ -1165,6 +1166,14 @@ rb_yjit_set_exception_return(rb_control_frame_t *cfp, void *leave_exit, void *le
         // to keep executing Ruby frames with the interpreter.
         cfp->jit_return = leave_exception;
     }
+}
+
+rb_jit_frame_t *
+rb_yjit_frame_new(VALUE *pc)
+{
+    rb_jit_frame_t *jit_frame = xmalloc(sizeof(rb_jit_frame_t));
+    jit_frame->pc = pc;
+    return jit_frame;
 }
 
 // Primitives used by yjit.rb

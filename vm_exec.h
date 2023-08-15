@@ -69,7 +69,7 @@ error !
   if (0) { \
       ruby_debug_printf("exec: %s@(%"PRIdPTRDIFF", %"PRIdPTRDIFF")@%s:%u\n", #insn, \
                         (reg_pc - ISEQ_BODY(reg_cfp->iseq)->iseq_encoded), \
-                        (reg_cfp->pc - ISEQ_BODY(reg_cfp->iseq)->iseq_encoded), \
+                        (CFP_PC(reg_cfp) - ISEQ_BODY(reg_cfp->iseq)->iseq_encoded), \
                         RSTRING_PTR(rb_iseq_path(reg_cfp->iseq)), \
                         rb_iseq_line_no(reg_cfp->iseq, reg_pc - ISEQ_BODY(reg_cfp->iseq)->iseq_encoded)); \
   }

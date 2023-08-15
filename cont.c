@@ -1297,7 +1297,7 @@ rb_jit_cont_each_iseq(rb_iseq_callback callback, void *data)
         const rb_control_frame_t *cfp;
         for (cfp = RUBY_VM_END_CONTROL_FRAME(cont->ec) - 1; ; cfp = RUBY_VM_NEXT_CONTROL_FRAME(cfp)) {
             const rb_iseq_t *iseq;
-            if (cfp->pc && (iseq = cfp->iseq) != NULL && imemo_type((VALUE)iseq) == imemo_iseq) {
+            if (CFP_PC(cfp) && (iseq = cfp->iseq) != NULL && imemo_type((VALUE)iseq) == imemo_iseq) {
                 callback(iseq, data);
             }
 
@@ -1406,7 +1406,7 @@ show_vm_pcs(const rb_control_frame_t *cfp,
     while (cfp != end_of_cfp) {
         int pc = 0;
         if (cfp->iseq) {
-            pc = cfp->pc - ISEQ_BODY(cfp->iseq)->iseq_encoded;
+            pc = CFP_PC(cfp) - ISEQ_BODY(cfp->iseq)->iseq_encoded;
         }
         fprintf(stderr, "%2d pc: %d\n", i++, pc);
         cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);

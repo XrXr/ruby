@@ -704,6 +704,11 @@ pub struct rb_block__bindgen_ty_1 {
     pub proc_: __BindgenUnionField<VALUE>,
     pub bindgen_union_field: [u64; 3usize],
 }
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct rb_jit_frame_t {
+    pub pc: *mut VALUE,
+}
 pub type rb_control_frame_t = rb_control_frame_struct;
 #[repr(C)]
 pub struct rb_proc_t {
@@ -1364,4 +1369,5 @@ extern "C" {
         leave_exit: *mut ::std::os::raw::c_void,
         leave_exception: *mut ::std::os::raw::c_void,
     );
+    pub fn rb_yjit_frame_new(pc: *mut VALUE) -> *mut rb_jit_frame_t;
 }

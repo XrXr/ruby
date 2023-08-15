@@ -270,7 +270,10 @@ fn jit_save_pc(jit: &JITState, asm: &mut Assembler) {
     };
 
     asm.comment("save PC to CFP");
-    asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_PC), Opnd::const_ptr(ptr as *const u8));
+    //asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_PC), Opnd::const_ptr(ptr as *const u8));
+    //asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
+    let jit_frame = unsafe { rb_yjit_frame_new(ptr as _) };
+    asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), Opnd::const_ptr(jit_frame as _));
 }
 
 /// Save the current SP on the CFP
@@ -300,7 +303,11 @@ fn jit_prepare_routine_call(
     asm: &mut Assembler
 ) {
     jit.record_boundary_patch_point = true;
+
     jit_save_pc(jit, asm);
+    //let jit_frame = unsafe { rb_yjit_frame_new(jit.get_pc() as _) };
+    //asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), Opnd::const_ptr(jit_frame as _));
+
     gen_save_sp(asm);
 
     // In case the routine calls Ruby methods, it can set local variables
@@ -436,6 +443,12 @@ fn gen_exit(exit_pc: *mut VALUE, asm: &mut Assembler) {
 
     // Spill stack temps before returning to the interpreter
     asm.spill_temps();
+
+    // TODO: Call the materialize function
+    asm.mov(
+        Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME),
+        Opnd::const_ptr(0 as *const u8)
+    );
 
     // Generate the code to exit to the interpreters
     // Write the adjusted SP back into the CFP
@@ -5198,8 +5211,14 @@ fn gen_push_frame(
     // For an iseq call PC may be None, in which case we will not set PC and will allow jitted code
     // to set it as necessary.
     if let Some(pc) = frame.pc {
-        asm.mov(cfp_opnd(RUBY_OFFSET_CFP_PC), pc.into());
+        let jit_frame = unsafe { rb_yjit_frame_new(pc as _) } as usize;
+        asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), jit_frame.into());
+        //asm.mov(cfp_opnd(RUBY_OFFSET_CFP_PC), pc.into());
+    } else {
+        asm.mov(cfp_opnd(RUBY_OFFSET_CFP_PC), 0.into());
+        //asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
     };
+    //asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
     asm.mov(cfp_opnd(RUBY_OFFSET_CFP_SP), sp);
     let iseq: Opnd = if let Some(iseq) = frame.iseq {
         VALUE::from(iseq).into()

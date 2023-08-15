@@ -993,6 +993,9 @@ leave
 #endif
     }
     else {
+        if (rb_yjit_enabled_p()) {
+            rb_vm_cfp_materialize(ec->cfp);
+        }
         RESTORE_REGS();
     }
 }
