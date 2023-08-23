@@ -148,7 +148,7 @@ control_frame_dump(const rb_execution_context_t *ec, const rb_control_frame_t *c
     else {
         fprintf(stderr, "p:%04"PRIdPTRDIFF" ", pc);
     }
-    fprintf(stderr, "s:%04"PRIdPTRDIFF" ", cfp->sp - ec->vm_stack);
+    fprintf(stderr, "s:%04"PRIdPTRDIFF" ", CFP_SP(cfp) - ec->vm_stack);
     fprintf(stderr, ep_in_heap == ' ' ? "e:%06"PRIdPTRDIFF" " : "E:%06"PRIxPTRDIFF" ", ep % 10000);
     fprintf(stderr, "%-6s", magic);
     if (line) {
@@ -383,7 +383,7 @@ rb_vmdebug_debug_print_register(const rb_execution_context_t *ec)
 
     cfpi = ((rb_control_frame_t *)(ec->vm_stack + ec->vm_stack_size)) - cfp;
     fprintf(stderr, "  [PC] %04"PRIdPTRDIFF", [SP] %04"PRIdPTRDIFF", [EP] %04"PRIdPTRDIFF", [CFP] %04"PRIdPTRDIFF"\n",
-            pc, (cfp->sp - ec->vm_stack), ep, cfpi);
+            pc, (CFP_SP(cfp) - ec->vm_stack), ep, cfpi);
 }
 
 void
@@ -405,7 +405,7 @@ rb_vmdebug_debug_print_pre(const rb_execution_context_t *ec, const rb_control_fr
             printf(" ");
         }
         printf("| ");
-        if(0)printf("[%03ld] ", (long)(cfp->sp - ec->vm_stack));
+        if(0)printf("[%03ld] ", (long)(CFP_SP(cfp) - ec->vm_stack));
 
         /* printf("%3"PRIdPTRDIFF" ", VM_CFP_CNT(ec, cfp)); */
         if (pc >= 0) {
@@ -450,7 +450,7 @@ rb_vmdebug_thread_dump_state(VALUE self)
     rb_control_frame_t *cfp = th->ec->cfp;
 
     fprintf(stderr, "Thread state dump:\n");
-    fprintf(stderr, "pc : %p, sp : %p\n", (void *)CFP_PC(cfp), (void *)cfp->sp);
+    fprintf(stderr, "pc : %p, sp : %p\n", (void *)CFP_PC(cfp), (void *)CFP_SP(cfp));
     fprintf(stderr, "cfp: %p, ep : %p\n", (void *)cfp, (void *)cfp->ep);
 
     return Qnil;

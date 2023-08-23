@@ -376,7 +376,7 @@ vm_push_frame(rb_execution_context_t *ec,
     /* setup new frame */
     *cfp = (const struct rb_control_frame_struct) {
         ._pc        = pc,
-        .sp         = sp,
+        ._sp        = sp,
         .iseq       = iseq,
         .self       = self,
         .ep         = sp - 1,
@@ -449,7 +449,7 @@ rb_vm_push_frame_fname(rb_execution_context_t *ec, VALUE fname)
                   VM_BLOCK_HANDLER_NONE, // VALUE specval,
                   Qfalse, // VALUE cref_or_me,
                   NULL, // const VALUE *pc,
-                  ec->cfp->sp, // VALUE *sp,
+                  CFP_SP(ec->cfp), // VALUE *sp,
                   0, // int local_size,
                   0); // int stack_max
 
@@ -2472,7 +2472,7 @@ vm_base_ptr(const rb_control_frame_t *cfp)
     const rb_control_frame_t *prev_cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
 
     if (cfp->iseq && VM_FRAME_RUBYFRAME_P(cfp)) {
-        VALUE *bp = prev_cfp->sp + ISEQ_BODY(cfp->iseq)->local_table_size + VM_ENV_DATA_SIZE;
+        VALUE *bp = CFP_SP(prev_cfp) + ISEQ_BODY(cfp->iseq)->local_table_size + VM_ENV_DATA_SIZE;
         if (ISEQ_BODY(cfp->iseq)->type == ISEQ_TYPE_METHOD || VM_FRAME_BMETHOD_P(cfp)) {
             /* adjust `self' */
             bp += 1;
@@ -2573,7 +2573,8 @@ rb_iseq_only_kwparam_p(const rb_iseq_t *iseq)
 static inline bool
 vm_caller_setup_arg_splat(rb_control_frame_t *cfp, struct rb_calling_info *calling, VALUE ary, int max_args)
 {
-    vm_check_canary(GET_EC(), cfp->sp);
+    ASSERT_FRAME_MATERIALIZED(cfp);
+    vm_check_canary(GET_EC(), cfp->_sp);
     bool ret = false;
 
     if (!NIL_P(ary)) {
@@ -2585,12 +2586,12 @@ vm_caller_setup_arg_splat(rb_control_frame_t *cfp, struct rb_calling_info *calli
             /* Avoid SystemStackError when splatting large arrays by storing arguments in
              * a temporary array, instead of trying to keeping arguments on the VM stack.
              */
-            VALUE *argv = cfp->sp - argc;
+            VALUE *argv = cfp->_sp - argc;
             VALUE argv_ary = rb_ary_hidden_new(len + argc + 1);
             rb_ary_cat(argv_ary, argv, argc);
             rb_ary_cat(argv_ary, ptr, len);
-            cfp->sp -= argc - 1;
-            cfp->sp[-1] = argv_ary;
+            cfp->_sp -= argc - 1;
+            cfp->_sp[-1] = argv_ary;
             calling->argc = 1;
             calling->heap_argv = argv_ary;
             RB_GC_GUARD(ary);
@@ -2621,7 +2622,7 @@ vm_caller_setup_arg_splat(rb_control_frame_t *cfp, struct rb_calling_info *calli
             CHECK_VM_STACK_OVERFLOW(cfp, len);
 
             for (i = 0; i < len; i++) {
-                *cfp->sp++ = ptr[i];
+                *cfp->_sp++ = ptr[i];
             }
             calling->argc += i;
         }
@@ -2636,15 +2637,17 @@ vm_caller_setup_arg_kw(rb_control_frame_t *cfp, struct rb_calling_info *calling,
     const VALUE *const passed_keywords = vm_ci_kwarg(ci)->keywords;
     const int kw_len = vm_ci_kwarg(ci)->keyword_len;
     const VALUE h = rb_hash_new_with_size(kw_len);
-    VALUE *sp = cfp->sp;
+    VALUE *sp = cfp->_sp;
     int i;
+
+    ASSERT_FRAME_MATERIALIZED(cfp);
 
     for (i=0; i<kw_len; i++) {
         rb_hash_aset(h, passed_keywords[i], (sp - kw_len)[i]);
     }
     (sp-kw_len)[0] = h;
 
-    cfp->sp -= kw_len - 1;
+    cfp->_sp -= kw_len - 1;
     calling->argc -= kw_len - 1;
     calling->kw_splat = 1;
 }
@@ -2670,15 +2673,17 @@ CALLER_SETUP_ARG(struct rb_control_frame_struct *restrict cfp,
                  struct rb_calling_info *restrict calling,
                  const struct rb_callinfo *restrict ci, int max_args)
 {
+    ASSERT_FRAME_MATERIALIZED(cfp);
+
     if (UNLIKELY(IS_ARGS_SPLAT(ci))) {
         if (IS_ARGS_KW_SPLAT(ci)) {
             // f(*a, **kw)
             VM_ASSERT(calling->kw_splat == 1);
 
-            cfp->sp -= 2;
+            cfp->_sp -= 2;
             calling->argc -= 2;
-            VALUE ary = cfp->sp[0];
-            VALUE kwh = vm_caller_setup_keyword_hash(ci, cfp->sp[1]);
+            VALUE ary = cfp->_sp[0];
+            VALUE kwh = vm_caller_setup_keyword_hash(ci, cfp->_sp[1]);
 
             // splat a
             if (vm_caller_setup_arg_splat(cfp, calling, ary, max_args)) return;
@@ -2693,8 +2698,8 @@ CALLER_SETUP_ARG(struct rb_control_frame_struct *restrict cfp,
                     }
                 }
                 else {
-                    cfp->sp[0] = kwh;
-                    cfp->sp++;
+                    cfp->_sp[0] = kwh;
+                    cfp->_sp++;
                     calling->argc++;
 
                     VM_ASSERT(calling->kw_splat == 1);
@@ -2708,9 +2713,9 @@ CALLER_SETUP_ARG(struct rb_control_frame_struct *restrict cfp,
             // f(*a)
             VM_ASSERT(calling->kw_splat == 0);
 
-            cfp->sp -= 1;
+            cfp->_sp -= 1;
             calling->argc -= 1;
-            VALUE ary = cfp->sp[0];
+            VALUE ary = cfp->_sp[0];
 
             if (vm_caller_setup_arg_splat(cfp, calling, ary, max_args)) {
                 goto check_keyword;
@@ -2735,15 +2740,15 @@ CALLER_SETUP_ARG(struct rb_control_frame_struct *restrict cfp,
 check_keyword:
                 if (!IS_ARGS_KEYWORD(ci) &&
                     calling->argc > 0 &&
-                    RB_TYPE_P((last_hash = cfp->sp[-1]), T_HASH) &&
+                    RB_TYPE_P((last_hash = cfp->_sp[-1]), T_HASH) &&
                     (((struct RHash *)last_hash)->basic.flags & RHASH_PASS_AS_KEYWORDS)) {
 
                     if (RHASH_EMPTY_P(last_hash)) {
                         calling->argc--;
-                        cfp->sp -= 1;
+                        cfp->_sp -= 1;
                     }
                     else {
-                        cfp->sp[-1] = rb_hash_dup(last_hash);
+                        cfp->_sp[-1] = rb_hash_dup(last_hash);
                         calling->kw_splat = 1;
                     }
                 }
@@ -2753,15 +2758,15 @@ check_keyword:
     else if (UNLIKELY(IS_ARGS_KW_SPLAT(ci))) {
         // f(**kw)
         VM_ASSERT(calling->kw_splat == 1);
-        VALUE kwh = vm_caller_setup_keyword_hash(ci, cfp->sp[-1]);
+        VALUE kwh = vm_caller_setup_keyword_hash(ci, cfp->_sp[-1]);
 
         if (RHASH_EMPTY_P(kwh)) {
-            cfp->sp--;
+            cfp->_sp--;
             calling->argc--;
             calling->kw_splat = 0;
         }
         else {
-            cfp->sp[-1] = kwh;
+            cfp->_sp[-1] = kwh;
         }
     }
     else if (UNLIKELY(IS_ARGS_KEYWORD(ci))) {
@@ -2858,13 +2863,14 @@ vm_call_iseq_setup_kwparm_kwarg(rb_execution_context_t *ec, rb_control_frame_t *
 
     VM_ASSERT(vm_ci_flag(ci) & VM_CALL_KWARG);
     RB_DEBUG_COUNTER_INC(ccf_iseq_kw1);
+    ASSERT_FRAME_MATERIALIZED(cfp);
 
     const rb_iseq_t *iseq = def_iseq_ptr(vm_cc_cme(cc)->def);
     const struct rb_iseq_param_keyword *kw_param = ISEQ_BODY(iseq)->param.keyword;
     const struct rb_callinfo_kwarg *kw_arg = vm_ci_kwarg(ci);
     const int ci_kw_len = kw_arg->keyword_len;
     const VALUE * const ci_keywords = kw_arg->keywords;
-    VALUE *argv = cfp->sp - calling->argc;
+    VALUE *argv = cfp->_sp - calling->argc;
     VALUE *const klocals = argv + kw_param->bits_start - kw_param->num;
     const int lead_num = ISEQ_BODY(iseq)->param.lead_num;
     VALUE * const ci_kws = ALLOCA_N(VALUE, ci_kw_len);
@@ -2885,10 +2891,11 @@ vm_call_iseq_setup_kwparm_nokwarg(rb_execution_context_t *ec, rb_control_frame_t
 
     VM_ASSERT((vm_ci_flag(ci) & VM_CALL_KWARG) == 0);
     RB_DEBUG_COUNTER_INC(ccf_iseq_kw2);
+    ASSERT_FRAME_MATERIALIZED(cfp);
 
     const rb_iseq_t *iseq = def_iseq_ptr(vm_cc_cme(cc)->def);
     const struct rb_iseq_param_keyword *kw_param = ISEQ_BODY(iseq)->param.keyword;
-    VALUE * const argv = cfp->sp - calling->argc;
+    VALUE * const argv = cfp->_sp - calling->argc;
     VALUE * const klocals = argv + kw_param->bits_start - kw_param->num;
 
     int i;
@@ -2911,8 +2918,9 @@ static VALUE
 vm_call_single_noarg_inline_builtin(rb_execution_context_t *ec, rb_control_frame_t *cfp,
                                     struct rb_calling_info *calling)
 {
+    ASSERT_FRAME_MATERIALIZED(cfp);
     const struct rb_builtin_function *bf = calling->cc->aux_.bf;
-    cfp->sp -= (calling->argc + 1);
+    cfp->_sp -= (calling->argc + 1);
     return builtin_invoker0(ec, calling->recv, NULL, (rb_insn_func_t)bf->func_ptr);
 }
 
@@ -3028,12 +3036,13 @@ static VALUE
 vm_call_iseq_setup(rb_execution_context_t *ec, rb_control_frame_t *cfp, struct rb_calling_info *calling)
 {
     RB_DEBUG_COUNTER_INC(ccf_iseq_setup);
+    ASSERT_FRAME_MATERIALIZED(cfp);
 
     const struct rb_callcache *cc = calling->cc;
     const rb_iseq_t *iseq = def_iseq_ptr(vm_cc_cme(cc)->def);
     const int param_size = ISEQ_BODY(iseq)->param.size;
     const int local_size = ISEQ_BODY(iseq)->local_table_size;
-    const int opt_pc = vm_callee_setup_arg(ec, calling, iseq, cfp->sp - calling->argc, param_size, local_size);
+    const int opt_pc = vm_callee_setup_arg(ec, calling, iseq, cfp->_sp - calling->argc, param_size, local_size);
     return vm_call_iseq_setup_2(ec, cfp, calling, opt_pc, param_size, local_size);
 }
 
@@ -3056,10 +3065,12 @@ static inline VALUE
 vm_call_iseq_setup_normal(rb_execution_context_t *ec, rb_control_frame_t *cfp, struct rb_calling_info *calling, const rb_callable_method_entry_t *me,
                           int opt_pc, int param_size, int local_size)
 {
+    ASSERT_FRAME_MATERIALIZED(cfp);
+
     const rb_iseq_t *iseq = def_iseq_ptr(me->def);
-    VALUE *argv = cfp->sp - calling->argc;
+    VALUE *argv = cfp->_sp - calling->argc;
     VALUE *sp = argv + param_size;
-    cfp->sp = argv - 1 /* recv */;
+    cfp->_sp = argv - 1 /* recv */;
 
     vm_push_frame(ec, iseq, VM_FRAME_MAGIC_METHOD | VM_ENV_FLAG_LOCAL, calling->recv,
                   calling->block_handler, (VALUE)me,
@@ -3072,6 +3083,8 @@ vm_call_iseq_setup_normal(rb_execution_context_t *ec, rb_control_frame_t *cfp, s
 static inline VALUE
 vm_call_iseq_setup_tailcall(rb_execution_context_t *ec, rb_control_frame_t *cfp, struct rb_calling_info *calling, int opt_pc)
 {
+    ASSERT_FRAME_MATERIALIZED(cfp);
+
     const struct rb_callcache *cc = calling->cc;
     unsigned int i;
     VALUE *argv = cfp->sp - calling->argc;
@@ -3096,7 +3109,7 @@ vm_call_iseq_setup_tailcall(rb_execution_context_t *ec, rb_control_frame_t *cfp,
     vm_pop_frame(ec, cfp, cfp->ep);
     cfp = ec->cfp;
 
-    sp_orig = sp = cfp->sp;
+    sp_orig = sp = cfp->_sp;
 
     /* push self */
     sp[0] = calling->recv;
@@ -3113,7 +3126,7 @@ vm_call_iseq_setup_tailcall(rb_execution_context_t *ec, rb_control_frame_t *cfp,
                   ISEQ_BODY(iseq)->local_table_size - ISEQ_BODY(iseq)->param.size,
                   ISEQ_BODY(iseq)->stack_max);
 
-    cfp->sp = sp_orig;
+    cfp->_sp = sp_orig;
 
     return Qundef;
 }
@@ -3460,25 +3473,26 @@ vm_call_cfunc_with_frame_(rb_execution_context_t *ec, rb_control_frame_t *reg_cf
     }
 
     VM_ASSERT(reg_cfp == ec->cfp);
+    ASSERT_FRAME_MATERIALIZED(reg_cfp);
 
     RUBY_DTRACE_CMETHOD_ENTRY_HOOK(ec, me->owner, me->def->original_id);
     EXEC_EVENT_HOOK(ec, RUBY_EVENT_C_CALL, recv, me->def->original_id, vm_ci_mid(ci), me->owner, Qundef);
 
     vm_push_frame(ec, NULL, frame_type, recv,
                   block_handler, (VALUE)me,
-                  0, ec->cfp->sp, 0, 0);
+                  0, ec->cfp->_sp, 0, 0);
 
     int len = cfunc->argc;
     if (len >= 0) rb_check_arity(argc, len, len);
 
-    reg_cfp->sp = stack_bottom;
+    reg_cfp->_sp = stack_bottom;
     val = (*cfunc->invoker)(recv, argc, argv, cfunc->func);
 
     CHECK_CFP_CONSISTENCY("vm_call_cfunc");
 
     rb_vm_pop_frame(ec);
 
-    VM_ASSERT(ec->cfp->sp == stack_bottom);
+    VM_ASSERT(reg_cfp->_sp == stack_bottom);
 
     EXEC_EVENT_HOOK(ec, RUBY_EVENT_C_RETURN, recv, me->def->original_id, vm_ci_mid(ci), me->owner, val);
     RUBY_DTRACE_CMETHOD_RETURN_HOOK(ec, me->owner, me->def->original_id);
@@ -5566,6 +5580,7 @@ vm_sendish(
 VALUE
 rb_vm_send(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, CALL_DATA cd, ISEQ blockiseq)
 {
+    rb_vm_cfp_materialize(GET_CFP());
     VALUE bh = vm_caller_setup_arg_block(ec, GET_CFP(), cd->ci, blockiseq, false);
     VALUE val = vm_sendish(ec, GET_CFP(), cd, bh, mexp_search_method);
     VM_EXEC(ec, val);
@@ -5575,6 +5590,7 @@ rb_vm_send(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, CALL_DATA cd
 VALUE
 rb_vm_opt_send_without_block(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, CALL_DATA cd)
 {
+    rb_vm_cfp_materialize(GET_CFP());
     VALUE bh = VM_BLOCK_HANDLER_NONE;
     VALUE val = vm_sendish(ec, GET_CFP(), cd, bh, mexp_search_method);
     VM_EXEC(ec, val);
@@ -5584,6 +5600,7 @@ rb_vm_opt_send_without_block(rb_execution_context_t *ec, rb_control_frame_t *reg
 VALUE
 rb_vm_invokesuper(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, CALL_DATA cd, ISEQ blockiseq)
 {
+    rb_vm_cfp_materialize(GET_CFP());
     VALUE bh = vm_caller_setup_arg_block(ec, GET_CFP(), cd->ci, blockiseq, true);
     VALUE val = vm_sendish(ec, GET_CFP(), cd, bh, mexp_search_super);
     VM_EXEC(ec, val);
@@ -5593,6 +5610,7 @@ rb_vm_invokesuper(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, CALL_
 VALUE
 rb_vm_invokeblock(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, CALL_DATA cd)
 {
+    rb_vm_cfp_materialize(GET_CFP());
     VALUE bh = VM_BLOCK_HANDLER_NONE;
     VALUE val = vm_sendish(ec, GET_CFP(), cd, bh, mexp_search_invokeblock);
     VM_EXEC(ec, val);

@@ -61,7 +61,7 @@ RUBY_EXTERN rb_serial_t ruby_vm_global_cvar_state;
 
 #define VM_REG_CFP (reg_cfp)
 #define VM_REG_PC  (VM_REG_CFP->_pc)
-#define VM_REG_SP  (VM_REG_CFP->sp)
+#define VM_REG_SP  (VM_REG_CFP->_sp)
 #define VM_REG_EP  (VM_REG_CFP->ep)
 
 #define RESTORE_REGS() do { \

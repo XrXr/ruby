@@ -475,12 +475,14 @@ setup_parameters_complex(rb_execution_context_t * const ec, const rb_iseq_t * co
     int opt_pc = 0, allow_autosplat = !kw_flag;
     struct args_info args_body, *args;
     VALUE keyword_hash = Qnil;
-    VALUE * const orig_sp = ec->cfp->sp;
+    VALUE * const orig_sp = ec->cfp->_sp;
     unsigned int i;
     VALUE flag_keyword_hash = 0;
     VALUE splat_flagged_keyword_hash = 0;
     VALUE converted_keyword_hash = 0;
     VALUE rest_last = 0;
+
+    ASSERT_FRAME_MATERIALIZED(ec->cfp);
 
     vm_check_canary(ec, orig_sp);
     /*
@@ -500,7 +502,7 @@ setup_parameters_complex(rb_execution_context_t * const ec, const rb_iseq_t * co
     for (i=calling->argc; i<ISEQ_BODY(iseq)->param.size; i++) {
         locals[i] = Qnil;
     }
-    ec->cfp->sp = &locals[i];
+    ec->cfp->_sp = &locals[i];
 
     /* setup args */
     args = &args_body;
@@ -752,7 +754,7 @@ setup_parameters_complex(rb_execution_context_t * const ec, const rb_iseq_t * co
     }
 #endif
 
-    ec->cfp->sp = orig_sp;
+    ec->cfp->_sp = orig_sp;
     return opt_pc;
 }
 
@@ -765,7 +767,7 @@ raise_argument_error(rb_execution_context_t *ec, const rb_iseq_t *iseq, const VA
         vm_push_frame(ec, iseq, VM_FRAME_MAGIC_DUMMY | VM_ENV_FLAG_LOCAL, Qnil /* self */,
                       VM_BLOCK_HANDLER_NONE /* specval*/, Qfalse /* me or cref */,
                       ISEQ_BODY(iseq)->iseq_encoded,
-                      ec->cfp->sp, 0, 0 /* stack_max */);
+                      CFP_SP(ec->cfp), 0, 0 /* stack_max */);
         at = rb_ec_backtrace_object(ec);
         rb_backtrace_use_iseq_first_lineno_for_last_location(at);
         rb_vm_pop_frame(ec);
@@ -878,8 +880,9 @@ static VALUE
 vm_caller_setup_arg_block(const rb_execution_context_t *ec, rb_control_frame_t *reg_cfp,
                           const struct rb_callinfo *ci, const rb_iseq_t *blockiseq, const int is_super)
 {
+    ASSERT_FRAME_MATERIALIZED(reg_cfp);
     if (vm_ci_flag(ci) & VM_CALL_ARGS_BLOCKARG) {
-        VALUE block_code = *(--reg_cfp->sp);
+        VALUE block_code = *(--reg_cfp->_sp);
 
         if (NIL_P(block_code)) {
             return VM_BLOCK_HANDLER_NONE;

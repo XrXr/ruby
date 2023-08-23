@@ -225,8 +225,8 @@ rjit_full_cfunc_return(rb_execution_context_t *ec, VALUE return_value)
 
     // Push return value into the caller's stack. We know that it's a frame that
     // uses cfp->sp because we are patching a call done with gen_send_cfunc().
-    ec->cfp->sp[0] = return_value;
-    ec->cfp->sp++;
+    ec->cfp->_sp[0] = return_value;
+    ec->cfp->_sp++;
 }
 
 static rb_proc_t *

@@ -392,14 +392,14 @@ rb_rjit_branch_stub_hit(VALUE branch_stub, int sp_offset, int target0_p)
     rb_vm_barrier();
 
     rb_control_frame_t *cfp = GET_EC()->cfp;
-    cfp->sp += sp_offset; // preserve stack values, also using the actual sp_offset to make jit.peek_at_stack work
+    cfp->_sp += sp_offset; // preserve stack values, also using the actual sp_offset to make jit.peek_at_stack work
 
     WITH_RJIT_ISOLATED({
         VALUE cfp_ptr = rb_funcall(rb_cRJITCfpPtr, rb_intern("new"), 1, SIZET2NUM((size_t)cfp));
         result = rb_funcall(rb_RJITCompiler, rb_intern("branch_stub_hit"), 3, branch_stub, cfp_ptr, RBOOL(target0_p));
     });
 
-    cfp->sp -= sp_offset; // reset for consistency with the code without the stub
+    cfp->_sp -= sp_offset; // reset for consistency with the code without the stub
 
     RB_VM_LOCK_LEAVE();
 

@@ -812,15 +812,21 @@ struct rb_block {
     enum rb_block_type type;
 };
 
+#define ASSERT_FRAME_MATERIALIZED(cfp) RUBY_ASSERT(! (cfp)->jit_frame)
+
 #define CFP_PC(cfp) (cfp->jit_frame ? cfp->jit_frame->pc : cfp->_pc)
 
-typedef struct {
+// FIXME: this is recursive and can blow the machine stack
+#define CFP_SP(cfp) (cfp->jit_frame ? (rb_vm_base_ptr(cfp) + cfp->jit_frame->sp_offset) : cfp->_sp)
+
+typedef struct rb_jit_frame {
     VALUE *pc;
+    int32_t sp_offset;
 } rb_jit_frame_t;
 
 typedef struct rb_control_frame_struct {
     const VALUE *_pc;          // cfp[0]
-    VALUE *sp;                 // cfp[1]
+    VALUE *_sp;                // cfp[1]
     const rb_iseq_t *iseq;     // cfp[2]
     VALUE self;                // cfp[3] / block[0]
     const VALUE *ep;           // cfp[4] / block[1]
@@ -832,11 +838,14 @@ typedef struct rb_control_frame_struct {
 #endif
 } rb_control_frame_t;
 
+VALUE *rb_vm_base_ptr(const rb_control_frame_t *cfp);
+
 static inline void
 rb_vm_cfp_materialize(rb_control_frame_t *cfp)
 {
     if (cfp->jit_frame) {
-        cfp->_pc = cfp->jit_frame->pc;
+        cfp->_pc = CFP_PC(cfp);
+        cfp->_sp = CFP_SP(cfp);
         cfp->jit_frame = NULL;
     }
 }
@@ -1793,6 +1802,7 @@ const rb_callable_method_entry_t *rb_vm_frame_method_entry(const rb_control_fram
 #define CHECK_VM_STACK_OVERFLOW0(cfp, sp, margin) do {                       \
     STATIC_ASSERT(sizeof_sp,  sizeof(*(sp))  == sizeof(VALUE));              \
     STATIC_ASSERT(sizeof_cfp, sizeof(*(cfp)) == sizeof(rb_control_frame_t)); \
+    ASSERT_FRAME_MATERIALIZED((cfp));                                        \
     const struct rb_control_frame_struct *bound = (void *)&(sp)[(margin)];   \
     if (UNLIKELY((cfp) <= &bound[1])) {                                      \
         vm_stackoverflow();                                                  \
@@ -1800,7 +1810,7 @@ const rb_callable_method_entry_t *rb_vm_frame_method_entry(const rb_control_fram
 } while (0)
 
 #define CHECK_VM_STACK_OVERFLOW(cfp, margin) \
-    CHECK_VM_STACK_OVERFLOW0((cfp), (cfp)->sp, (margin))
+    CHECK_VM_STACK_OVERFLOW0((cfp), (cfp)->_sp, (margin))
 
 VALUE rb_catch_protect(VALUE t, rb_block_call_func *func, VALUE data, enum ruby_tag_type *stateptr);
 

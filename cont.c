@@ -1428,7 +1428,7 @@ cont_capture(volatile int *volatile stat)
     contval = cont->self;
 
 #ifdef CAPTURE_JUST_VALID_VM_STACK
-    cont->saved_vm_stack.slen = ec->cfp->sp - ec->vm_stack;
+    cont->saved_vm_stack.slen = CFP_SP(ec->cfp) - ec->vm_stack;
     cont->saved_vm_stack.clen = ec->vm_stack + ec->vm_stack_size - (VALUE*)ec->cfp;
     cont->saved_vm_stack.ptr = ALLOC_N(VALUE, cont->saved_vm_stack.slen + cont->saved_vm_stack.clen);
     MEMCPY(cont->saved_vm_stack.ptr,

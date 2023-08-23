@@ -383,10 +383,12 @@ rb_full_cfunc_return(rb_execution_context_t *ec, VALUE return_value)
     // since the Ruby return event works this way as well.
     RUBY_DTRACE_CMETHOD_RETURN_HOOK(ec, me->owner, me->def->original_id);
 
+    rb_vm_cfp_materialize(ec->cfp);
+
     // Push return value into the caller's stack. We know that it's a frame that
     // uses cfp->sp because we are patching a call done with gen_send_cfunc().
-    ec->cfp->sp[0] = return_value;
-    ec->cfp->sp++;
+    ec->cfp->_sp[0] = return_value;
+    ec->cfp->_sp++;
 }
 
 unsigned int
@@ -783,7 +785,7 @@ rb_get_cfp_pc(struct rb_control_frame_struct *cfp)
 VALUE *
 rb_get_cfp_sp(struct rb_control_frame_struct *cfp)
 {
-    return cfp->sp;
+    return CFP_SP(cfp);
 }
 
 void
@@ -796,7 +798,8 @@ rb_set_cfp_pc(struct rb_control_frame_struct *cfp, const VALUE *pc)
 void
 rb_set_cfp_sp(struct rb_control_frame_struct *cfp, VALUE *sp)
 {
-    cfp->sp = sp;
+    rb_vm_cfp_materialize(cfp);
+    cfp->_sp = sp;
 }
 
 rb_iseq_t *
@@ -828,8 +831,6 @@ rb_get_cfp_ep_level(struct rb_control_frame_struct *cfp, uint32_t lv)
     }
     return ep;
 }
-
-extern VALUE *rb_vm_base_ptr(struct rb_control_frame_struct *cfp);
 
 VALUE
 rb_yarv_class_of(VALUE obj)
