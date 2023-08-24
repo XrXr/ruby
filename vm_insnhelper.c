@@ -3087,7 +3087,7 @@ vm_call_iseq_setup_tailcall(rb_execution_context_t *ec, rb_control_frame_t *cfp,
 
     const struct rb_callcache *cc = calling->cc;
     unsigned int i;
-    VALUE *argv = cfp->sp - calling->argc;
+    VALUE *argv = cfp->_sp - calling->argc;
     const rb_callable_method_entry_t *me = vm_cc_cme(cc);
     const rb_iseq_t *iseq = def_iseq_ptr(me->def);
     VALUE *src_argv = argv;
@@ -3510,8 +3510,9 @@ rb_splat_or_kwargs_p(const struct rb_callinfo *restrict ci)
 static VALUE
 vm_call_cfunc_with_frame(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling)
 {
+    ASSERT_FRAME_MATERIALIZED(reg_cfp);
     int argc = calling->argc;
-    VALUE *stack_bottom = reg_cfp->sp - argc - 1;
+    VALUE *stack_bottom = reg_cfp->_sp - argc - 1;
     VALUE *argv = &stack_bottom[1];
 
     return vm_call_cfunc_with_frame_(ec, reg_cfp, calling, argc, argv, stack_bottom);
@@ -3522,6 +3523,7 @@ vm_call_cfunc_other(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, str
 {
     const struct rb_callinfo *ci = calling->cd->ci;
     RB_DEBUG_COUNTER_INC(ccf_cfunc_other);
+    ASSERT_FRAME_MATERIALIZED(reg_cfp);
 
     CALLER_SETUP_ARG(reg_cfp, calling, ci, ALLOW_HEAP_ARGV_KEEP_KWSPLAT);
     VALUE argv_ary;
@@ -3529,7 +3531,7 @@ vm_call_cfunc_other(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, str
         VM_ASSERT(!IS_ARGS_KEYWORD(ci));
         int argc = RARRAY_LENINT(argv_ary);
         VALUE *argv = (VALUE *)RARRAY_CONST_PTR(argv_ary);
-        VALUE *stack_bottom = reg_cfp->sp - 2;
+        VALUE *stack_bottom = reg_cfp->_sp - 2;
 
         VM_ASSERT(calling->argc == 1);
         VM_ASSERT(RB_TYPE_P(argv_ary, T_ARRAY));
@@ -3547,7 +3549,8 @@ vm_call_cfunc_other(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, str
 static inline VALUE
 vm_call_cfunc_array_argv(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling, int stack_offset, int argc_offset)
 {
-    VALUE argv_ary = reg_cfp->sp[-1 - stack_offset];
+    ASSERT_FRAME_MATERIALIZED(reg_cfp);
+    VALUE argv_ary = reg_cfp->_sp[-1 - stack_offset];
     int argc = RARRAY_LENINT(argv_ary) - argc_offset;
 
     if (UNLIKELY(argc > VM_ARGC_STACK_MAX)) {
@@ -3557,13 +3560,13 @@ vm_call_cfunc_array_argv(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp
     VALUE *argv = (VALUE *)RARRAY_CONST_PTR(argv_ary);
     calling->kw_splat = 0;
     int i;
-    VALUE *stack_bottom = reg_cfp->sp - 2 - stack_offset;
+    VALUE *stack_bottom = reg_cfp->_sp - 2 - stack_offset;
     VALUE *sp = stack_bottom;
     CHECK_VM_STACK_OVERFLOW(reg_cfp, argc);
     for(i = 0; i < argc; i++) {
         *++sp = argv[i];
     }
-    reg_cfp->sp = sp+1;
+    reg_cfp->_sp = sp+1;
 
     return vm_call_cfunc_with_frame_(ec, reg_cfp, calling, argc, stack_bottom+1, stack_bottom);
 }
@@ -3572,7 +3575,8 @@ static inline VALUE
 vm_call_cfunc_only_splat(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling)
 {
     RB_DEBUG_COUNTER_INC(ccf_cfunc_only_splat);
-    VALUE argv_ary = reg_cfp->sp[-1];
+    ASSERT_FRAME_MATERIALIZED(reg_cfp);
+    VALUE argv_ary = reg_cfp->_sp[-1];
     int argc = RARRAY_LENINT(argv_ary);
     VALUE *argv = (VALUE *)RARRAY_CONST_PTR(argv_ary);
     VALUE last_hash;
@@ -3592,8 +3596,9 @@ vm_call_cfunc_only_splat(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp
 static inline VALUE
 vm_call_cfunc_only_splat_kw(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling)
 {
+    ASSERT_FRAME_MATERIALIZED(reg_cfp);
     RB_DEBUG_COUNTER_INC(ccf_cfunc_only_splat_kw);
-    VALUE keyword_hash = reg_cfp->sp[-1];
+    VALUE keyword_hash = reg_cfp->_sp[-1];
 
     if (RB_TYPE_P(keyword_hash, T_HASH) && RHASH_EMPTY_P(keyword_hash)) {
         return vm_call_cfunc_array_argv(ec, reg_cfp, calling, 1, 0);
@@ -3628,9 +3633,10 @@ vm_call_cfunc(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb
 static VALUE
 vm_call_ivar(rb_execution_context_t *ec, rb_control_frame_t *cfp, struct rb_calling_info *calling)
 {
+    ASSERT_FRAME_MATERIALIZED(cfp);
     const struct rb_callcache *cc = calling->cc;
     RB_DEBUG_COUNTER_INC(ccf_ivar);
-    cfp->sp -= 1;
+    cfp->_sp -= 1;
     VALUE ivar = vm_getivar(calling->recv, vm_cc_cme(cc)->def->body.attr.id, NULL, NULL, cc, TRUE, Qnil);
     return ivar;
 }
@@ -3638,9 +3644,10 @@ vm_call_ivar(rb_execution_context_t *ec, rb_control_frame_t *cfp, struct rb_call
 static VALUE
 vm_call_attrset_direct(rb_execution_context_t *ec, rb_control_frame_t *cfp, const struct rb_callcache *cc, VALUE obj)
 {
+    ASSERT_FRAME_MATERIALIZED(cfp);
     RB_DEBUG_COUNTER_INC(ccf_attrset);
-    VALUE val = *(cfp->sp - 1);
-    cfp->sp -= 2;
+    VALUE val = *(cfp->_sp - 1);
+    cfp->_sp -= 2;
     attr_index_t index = vm_cc_attr_index(cc);
     shape_id_t dest_shape_id = vm_cc_attr_index_dest_shape_id(cc);
     ID id = vm_cc_cme(cc)->def->body.attr.id;
@@ -3698,6 +3705,7 @@ static VALUE invoke_bmethod(rb_execution_context_t *ec, const rb_iseq_t *iseq, V
 static VALUE
 vm_call_iseq_bmethod(rb_execution_context_t *ec, rb_control_frame_t *cfp, struct rb_calling_info *calling)
 {
+    ASSERT_FRAME_MATERIALIZED(cfp);
     RB_DEBUG_COUNTER_INC(ccf_iseq_bmethod);
 
     const struct rb_callcache *cc = calling->cc;
@@ -3720,7 +3728,7 @@ vm_call_iseq_bmethod(rb_execution_context_t *ec, rb_control_frame_t *cfp, struct
 
     const struct rb_captured_block *captured = &block->as.captured;
     const rb_iseq_t *iseq = rb_iseq_check(captured->code.iseq);
-    VALUE * const argv = cfp->sp - calling->argc;
+    VALUE * const argv = cfp->_sp - calling->argc;
     const int arg_size = ISEQ_BODY(iseq)->param.size;
 
     int opt_pc;
@@ -3731,7 +3739,7 @@ vm_call_iseq_bmethod(rb_execution_context_t *ec, rb_control_frame_t *cfp, struct
         opt_pc = setup_parameters_complex(ec, iseq, calling, calling->cd->ci, argv, arg_setup_method);
     }
 
-    cfp->sp = argv - 1; // -1 for the receiver
+    cfp->_sp = argv - 1; // -1 for the receiver
 
     vm_push_frame(ec, iseq,
                   VM_FRAME_MAGIC_BLOCK | VM_FRAME_FLAG_BMETHOD | VM_FRAME_FLAG_LAMBDA,
@@ -3749,6 +3757,7 @@ vm_call_iseq_bmethod(rb_execution_context_t *ec, rb_control_frame_t *cfp, struct
 static VALUE
 vm_call_noniseq_bmethod(rb_execution_context_t *ec, rb_control_frame_t *cfp, struct rb_calling_info *calling)
 {
+    ASSERT_FRAME_MATERIALIZED(cfp);
     RB_DEBUG_COUNTER_INC(ccf_noniseq_bmethod);
 
     VALUE *argv;
@@ -3756,13 +3765,13 @@ vm_call_noniseq_bmethod(rb_execution_context_t *ec, rb_control_frame_t *cfp, str
     CALLER_SETUP_ARG(cfp, calling, calling->cd->ci, ALLOW_HEAP_ARGV);
     if (UNLIKELY(calling->heap_argv)) {
         argv = RARRAY_PTR(calling->heap_argv);
-        cfp->sp -= 2;
+        cfp->_sp -= 2;
     }
     else {
         argc = calling->argc;
         argv = ALLOCA_N(VALUE, argc);
-        MEMCPY(argv, cfp->sp - argc, VALUE, argc);
-        cfp->sp += - argc - 1;
+        MEMCPY(argv, cfp->_sp - argc, VALUE, argc);
+        cfp->_sp += - argc - 1;
     }
 
     return vm_call_bmethod_body(ec, calling, argv);
@@ -4077,7 +4086,7 @@ vm_call_method_missing_body(rb_execution_context_t *ec, rb_control_frame_t *reg_
 
     /* shift arguments: m(a, b, c) #=> method_missing(:m, a, b, c) */
     CHECK_VM_STACK_OVERFLOW(reg_cfp, 1);
-    vm_check_canary(ec, reg_cfp->sp);
+    vm_check_canary(ec, reg_cfp->_sp);
     if (argc > 1) {
         MEMMOVE(argv+1, argv, VALUE, argc-1);
     }
@@ -4305,9 +4314,10 @@ static VALUE
 vm_call_opt_struct_aref(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling)
 {
     RB_DEBUG_COUNTER_INC(ccf_opt_struct_aref);
+    ASSERT_FRAME_MATERIALIZED(reg_cfp);
 
     VALUE ret = vm_call_opt_struct_aref0(ec, calling);
-    reg_cfp->sp -= 1;
+    reg_cfp->_sp -= 1;
     return ret;
 }
 
@@ -4332,9 +4342,10 @@ static VALUE
 vm_call_opt_struct_aset(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling)
 {
     RB_DEBUG_COUNTER_INC(ccf_opt_struct_aset);
+    ASSERT_FRAME_MATERIALIZED(reg_cfp);
 
-    VALUE ret = vm_call_opt_struct_aset0(ec, calling, *(reg_cfp->sp - 1));
-    reg_cfp->sp -= 2;
+    VALUE ret = vm_call_opt_struct_aset0(ec, calling, *(reg_cfp->_sp - 1));
+    reg_cfp->_sp -= 2;
     return ret;
 }
 
@@ -4742,6 +4753,7 @@ vm_yield_with_cfunc(rb_execution_context_t *ec,
     VALUE val, arg, blockarg;
     int frame_flag;
     const struct vm_ifunc *ifunc = captured->code.ifunc;
+    ASSERT_FRAME_MATERIALIZED(ec->cfp);
 
     if (is_lambda) {
         arg = rb_ary_new4(argc, argv);
@@ -4765,7 +4777,7 @@ vm_yield_with_cfunc(rb_execution_context_t *ec,
                   self,
                   VM_GUARDED_PREV_EP(captured->ep),
                   (VALUE)me,
-                  0, ec->cfp->sp, 0, 0);
+                  0, ec->cfp->_sp, 0, 0);
     val = (*ifunc->func)(arg, (VALUE)ifunc->data, argc, argv, blockarg);
     rb_vm_pop_frame(ec);
 
@@ -4901,6 +4913,7 @@ vm_invoke_symbol_block(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp,
                        struct rb_calling_info *calling, const struct rb_callinfo *ci,
                        MAYBE_UNUSED(bool is_lambda), VALUE block_handler)
 {
+    ASSERT_FRAME_MATERIALIZED(reg_cfp);
     VALUE symbol = VM_BH_TO_SYMBOL(block_handler);
     int flags = vm_ci_flag(ci);
 
@@ -4919,9 +4932,9 @@ vm_invoke_symbol_block(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp,
 #endif
             calling->recv = rb_ary_shift(calling->heap_argv);
             // Modify stack to avoid cfp consistency error
-            reg_cfp->sp++;
-            reg_cfp->sp[-1] = reg_cfp->sp[-2];
-            reg_cfp->sp[-2] = calling->recv;
+            reg_cfp->_sp++;
+            reg_cfp->_sp[-1] = reg_cfp->_sp[-2];
+            reg_cfp->_sp[-2] = calling->recv;
             flags |= VM_CALL_ARGS_SPLAT;
         }
         else {
@@ -5935,7 +5948,8 @@ vm_stack_consistency_error(const rb_execution_context_t *ec,
                            const rb_control_frame_t *cfp,
                            const VALUE *bp)
 {
-    const ptrdiff_t nsp = VM_SP_CNT(ec, cfp->sp);
+    ASSERT_FRAME_MATERIALIZED(cfp);
+    const ptrdiff_t nsp = VM_SP_CNT(ec, cfp->_sp);
     const ptrdiff_t nbp = VM_SP_CNT(ec, bp);
     static const char stack_consistency_error[] =
         "Stack consistency error (sp: %"PRIdPTRDIFF", bp: %"PRIdPTRDIFF")";

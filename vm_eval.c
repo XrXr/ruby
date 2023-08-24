@@ -166,7 +166,7 @@ vm_call0_cfunc_with_frame(rb_execution_context_t* ec, struct rb_calling_info *ca
 
         vm_push_frame(ec, 0, frame_flags, recv,
                       block_handler, (VALUE)me,
-                      0, reg_cfp->sp, 0, 0);
+                      0, CFP_SP(reg_cfp), 0, 0);
 
         if (len >= 0) rb_check_arity(argc, len, len);
 
@@ -208,6 +208,8 @@ vm_call0_body(rb_execution_context_t *ec, struct rb_calling_info *calling, const
     const struct rb_callcache *cc = calling->cc;
     VALUE ret;
 
+    rb_vm_cfp_materialize(ec->cfp);
+
   retry:
 
     switch (vm_cc_cme(cc)->def->type) {
@@ -217,11 +219,11 @@ vm_call0_body(rb_execution_context_t *ec, struct rb_calling_info *calling, const
             int i;
 
             CHECK_VM_STACK_OVERFLOW(reg_cfp, calling->argc + 1);
-            vm_check_canary(ec, reg_cfp->sp);
+            vm_check_canary(ec, reg_cfp->_sp);
 
-            *reg_cfp->sp++ = calling->recv;
+            *reg_cfp->_sp++ = calling->recv;
             for (i = 0; i < calling->argc; i++) {
-                *reg_cfp->sp++ = argv[i];
+                *reg_cfp->_sp++ = argv[i];
             }
 
             vm_call_iseq_setup(ec, reg_cfp, calling);
@@ -1215,8 +1217,8 @@ current_vm_stack_arg(const rb_execution_context_t *ec, const VALUE *argv)
 {
     rb_control_frame_t *prev_cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(ec->cfp);
     if (RUBY_VM_CONTROL_FRAME_STACK_OVERFLOW_P(ec, prev_cfp)) return NULL;
-    if (prev_cfp->sp + 1 != argv) return NULL;
-    return prev_cfp->sp + 1;
+    if (CFP_SP(prev_cfp) + 1 != argv) return NULL;
+    return CFP_SP(prev_cfp) + 1;
 }
 
 static VALUE
@@ -1228,6 +1230,8 @@ send_internal(int argc, const VALUE *argv, VALUE recv, call_type scope)
     VALUE ret, vargv = 0;
     rb_execution_context_t *ec = GET_EC();
     int public = scope == CALL_PUBLIC || scope == CALL_PUBLIC_KW;
+
+    rb_vm_cfp_materialize(ec->cfp);
 
     if (public) {
         self = Qundef;

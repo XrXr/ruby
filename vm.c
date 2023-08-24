@@ -679,7 +679,7 @@ vm_set_top_stack(rb_execution_context_t *ec, const rb_iseq_t *iseq)
     vm_push_frame(ec, iseq, VM_FRAME_MAGIC_TOP | VM_ENV_FLAG_LOCAL | VM_FRAME_FLAG_FINISH, rb_ec_thread_ptr(ec)->top_self,
                   VM_BLOCK_HANDLER_NONE,
                   (VALUE)vm_cref_new_toplevel(ec), /* cref or me */
-                  ISEQ_BODY(iseq)->iseq_encoded, ec->cfp->sp,
+                  ISEQ_BODY(iseq)->iseq_encoded, CFP_SP(ec->cfp),
                   ISEQ_BODY(iseq)->local_table_size, ISEQ_BODY(iseq)->stack_max);
 }
 
@@ -690,7 +690,7 @@ vm_set_eval_stack(rb_execution_context_t *ec, const rb_iseq_t *iseq, const rb_cr
                   vm_block_self(base_block), VM_GUARDED_PREV_EP(vm_block_ep(base_block)),
                   (VALUE)cref, /* cref or me */
                   ISEQ_BODY(iseq)->iseq_encoded,
-                  ec->cfp->sp, ISEQ_BODY(iseq)->local_table_size,
+                  CFP_SP(ec->cfp), ISEQ_BODY(iseq)->local_table_size,
                   ISEQ_BODY(iseq)->stack_max);
 }
 
@@ -1431,7 +1431,7 @@ invoke_block(rb_execution_context_t *ec, const rb_iseq_t *iseq, VALUE self, cons
                   VM_GUARDED_PREV_EP(captured->ep),
                   (VALUE)cref, /* cref or method */
                   ISEQ_BODY(iseq)->iseq_encoded + opt_pc,
-                  ec->cfp->sp + arg_size,
+                  CFP_SP(ec->cfp) + arg_size,
                   ISEQ_BODY(iseq)->local_table_size - arg_size,
                   ISEQ_BODY(iseq)->stack_max);
     return vm_exec(ec);
@@ -1450,7 +1450,7 @@ invoke_bmethod(rb_execution_context_t *ec, const rb_iseq_t *iseq, VALUE self, co
                   VM_GUARDED_PREV_EP(captured->ep),
                   (VALUE)me,
                   ISEQ_BODY(iseq)->iseq_encoded + opt_pc,
-                  ec->cfp->sp + 1 /* self */ + arg_size,
+                  CFP_SP(ec->cfp) + 1 /* self */ + arg_size,
                   ISEQ_BODY(iseq)->local_table_size - arg_size,
                   ISEQ_BODY(iseq)->stack_max);
 
@@ -1474,10 +1474,13 @@ invoke_iseq_block_from_c(rb_execution_context_t *ec, const struct rb_captured_bl
     int opt_pc;
     VALUE type = VM_FRAME_MAGIC_BLOCK | (is_lambda ? VM_FRAME_FLAG_LAMBDA : 0);
     rb_control_frame_t *cfp = ec->cfp;
-    VALUE *sp = cfp->sp;
     int flags = (kw_splat ? VM_CALL_KW_SPLAT : 0);
     VALUE *use_argv = (VALUE *)argv;
     VALUE av[2];
+
+    rb_vm_cfp_materialize(cfp);
+
+    VALUE *sp = cfp->_sp;
 
     stack_check(ec);
 
@@ -1496,12 +1499,12 @@ invoke_iseq_block_from_c(rb_execution_context_t *ec, const struct rb_captured_bl
         *sp = self; // bemthods need `self` on the VM stack
         stack_argv++;
     }
-    cfp->sp = stack_argv + argc;
+    cfp->_sp = stack_argv + argc;
     MEMCPY(stack_argv, use_argv, VALUE, argc); // restrict: new stack space
 
     opt_pc = vm_yield_setup_args(ec, iseq, argc, stack_argv, flags, passed_block_handler,
                                  (is_lambda ? arg_setup_method : arg_setup_block));
-    cfp->sp = sp;
+    cfp->_sp = sp;
 
     if (me == NULL) {
         return invoke_block(ec, iseq, self, captured, cref, type, opt_pc);
@@ -2507,7 +2510,7 @@ vm_exec_handle_exception(rb_execution_context_t *ec, enum ruby_tag_type state, V
                 }
                 else {
                     /* TAG_BREAK */
-                    *cfp->sp++ = THROW_DATA_VAL(err);
+                    *cfp->_sp++ = THROW_DATA_VAL(err);
                     ec->errinfo = Qnil;
                     return Qundef;
                 }
@@ -2577,10 +2580,10 @@ vm_exec_handle_exception(rb_execution_context_t *ec, enum ruby_tag_type state, V
                     }
                     else if (entry->type == type) {
                         cfp->_pc = ISEQ_BODY(cfp->iseq)->iseq_encoded + entry->cont;
-                        cfp->sp = vm_base_ptr(cfp) + entry->sp;
+                        cfp->_sp = vm_base_ptr(cfp) + entry->sp;
 
                         if (state != TAG_REDO) {
-                            *cfp->sp++ = THROW_DATA_VAL(err);
+                            *cfp->_sp++ = THROW_DATA_VAL(err);
                         }
                         ec->errinfo = Qnil;
                         VM_ASSERT(ec->tag->state == TAG_NONE);
@@ -2610,17 +2613,17 @@ vm_exec_handle_exception(rb_execution_context_t *ec, enum ruby_tag_type state, V
             const int arg_size = 1;
 
             rb_iseq_check(catch_iseq);
-            cfp->sp = vm_base_ptr(cfp) + cont_sp;
+            cfp->_sp = vm_base_ptr(cfp) + cont_sp;
             cfp->_pc = ISEQ_BODY(cfp->iseq)->iseq_encoded + cont_pc;
 
             /* push block frame */
-            cfp->sp[0] = (VALUE)err;
+            cfp->_sp[0] = (VALUE)err;
             vm_push_frame(ec, catch_iseq, VM_FRAME_MAGIC_RESCUE,
                           cfp->self,
                           VM_GUARDED_PREV_EP(cfp->ep),
                           0, /* cref or me */
                           ISEQ_BODY(catch_iseq)->iseq_encoded,
-                          cfp->sp + arg_size /* push value */,
+                          cfp->_sp + arg_size /* push value */,
                           ISEQ_BODY(catch_iseq)->local_table_size - arg_size,
                           ISEQ_BODY(catch_iseq)->stack_max);
 
@@ -2709,7 +2712,7 @@ rb_vm_call_cfunc(VALUE recv, VALUE (*func)(VALUE), VALUE arg,
     vm_push_frame(ec, iseq, VM_FRAME_MAGIC_TOP | VM_ENV_FLAG_LOCAL | VM_FRAME_FLAG_FINISH,
                   recv, block_handler,
                   (VALUE)vm_cref_new_toplevel(ec), /* cref or me */
-                  0, reg_cfp->sp, 0, 0);
+                  0, CFP_SP(reg_cfp), 0, 0);
 
     val = (*func)(arg);
 
@@ -2767,7 +2770,7 @@ rb_vm_each_stack_value(void *ptr, void (*cb)(VALUE, void*), void *ctx)
                     rb_execution_context_t * ec = th->ec;
                     if (ec->vm_stack) {
                         VALUE *p = ec->vm_stack;
-                        VALUE *sp = ec->cfp->sp;
+                        VALUE *sp = CFP_SP(ec->cfp);
                         while (p < sp) {
                             if (!rb_special_const_p(*p)) {
                                 cb(*p, ctx);
@@ -3108,7 +3111,7 @@ rb_execution_context_update(rb_execution_context_t *ec)
         long i;
         VM_ASSERT(ec->cfp);
         VALUE *p = ec->vm_stack;
-        VALUE *sp = ec->cfp->sp;
+        VALUE *sp = CFP_SP(ec->cfp);
         rb_control_frame_t *cfp = ec->cfp;
         rb_control_frame_t *limit_cfp = (void *)(ec->vm_stack + ec->vm_stack_size);
 
@@ -3159,11 +3162,10 @@ rb_execution_context_mark(const rb_execution_context_t *ec)
     if (ec->vm_stack) {
         VM_ASSERT(ec->cfp);
         VALUE *p = ec->vm_stack;
-        VALUE *sp = ec->cfp->sp;
+        VALUE *sp = CFP_SP(ec->cfp);
         rb_control_frame_t *cfp = ec->cfp;
         rb_control_frame_t *limit_cfp = (void *)(ec->vm_stack + ec->vm_stack_size);
 
-        VM_ASSERT(sp == ec->cfp->sp);
         rb_gc_mark_vm_stack_values((long)(sp - p), p);
 
         while (cfp != limit_cfp) {
@@ -3429,11 +3431,13 @@ rb_thread_alloc(VALUE klass)
 
 #define REWIND_CFP(expr) do { \
     rb_execution_context_t *ec__ = GET_EC(); \
-    VALUE *const curr_sp = (ec__->cfp++)->sp; \
-    VALUE *const saved_sp = ec__->cfp->sp; \
-    ec__->cfp->sp = curr_sp; \
+    VALUE *const curr_sp = CFP_SP(ec__->cfp); \
+    ec__->cfp++; \
+    rb_vm_cfp_materialize(ec__->cfp); \
+    VALUE *const saved_sp = ec__->cfp->_sp; \
+    ec__->cfp->_sp = curr_sp; \
     expr; \
-    (ec__->cfp--)->sp = saved_sp; \
+    (ec__->cfp--)->_sp = saved_sp; \
 } while (0)
 
 static VALUE
