@@ -98,7 +98,7 @@ class CFP(gdb.Command):
             if args.stack_size is not None:
                 stack_size = args.stack_size
             else:
-                stack_size = int((self.get_int(f'{cfp}->sp') - self.get_int(f'vm_base_ptr({cfp})')) / 8)
+                stack_size = int((self.get_int(f'{cfp}->_sp') - self.get_int(f'vm_base_ptr({cfp})')) / 8)
             print(f'Stack (size={stack_size}):')
             for i in range(0, stack_size):
                 self.print_stack(cfp, i, self.rp(cfp, i))
@@ -126,7 +126,7 @@ class CFP(gdb.Command):
     def regs(self, cfp, bp_index):
         address = self.get_int(f'vm_base_ptr({cfp}) + {bp_index}')
         regs = []
-        for reg, field in { 'EP': 'ep', 'SP': 'sp' }.items():
+        for reg, field in { 'EP': 'ep', 'SP': '_sp' }.items():
             if address == self.get_int(f'{cfp}->{field}'):
                 regs.append(reg)
         return ' '.join(regs)
