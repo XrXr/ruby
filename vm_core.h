@@ -1802,15 +1802,16 @@ const rb_callable_method_entry_t *rb_vm_frame_method_entry(const rb_control_fram
 #define CHECK_VM_STACK_OVERFLOW0(cfp, sp, margin) do {                       \
     STATIC_ASSERT(sizeof_sp,  sizeof(*(sp))  == sizeof(VALUE));              \
     STATIC_ASSERT(sizeof_cfp, sizeof(*(cfp)) == sizeof(rb_control_frame_t)); \
-    ASSERT_FRAME_MATERIALIZED((cfp));                                        \
     const struct rb_control_frame_struct *bound = (void *)&(sp)[(margin)];   \
     if (UNLIKELY((cfp) <= &bound[1])) {                                      \
         vm_stackoverflow();                                                  \
     }                                                                        \
 } while (0)
 
-#define CHECK_VM_STACK_OVERFLOW(cfp, margin) \
-    CHECK_VM_STACK_OVERFLOW0((cfp), (cfp)->_sp, (margin))
+#define CHECK_VM_STACK_OVERFLOW(cfp, margin) do {                            \
+    ASSERT_FRAME_MATERIALIZED((cfp));                                        \
+    CHECK_VM_STACK_OVERFLOW0((cfp), (cfp)->_sp, (margin));                   \
+} while (0)                                                                  \
 
 VALUE rb_catch_protect(VALUE t, rb_block_call_func *func, VALUE data, enum ruby_tag_type *stateptr);
 
