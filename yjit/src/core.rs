@@ -2464,7 +2464,7 @@ fn branch_stub_hit_body(branch_ptr: *const c_void, target_idx: u32, ec: EcPtr) -
 
         let running_iseq = rb_cfp_get_iseq(cfp);
         let reconned_pc = rb_iseq_pc_at_idx(running_iseq, target_blockid.idx.into());
-        let reconned_sp = original_interp_sp.offset(target_ctx.sp_offset.into());
+        let reconned_sp = get_cfp_bp(cfp).add(target_ctx.stack_size.into());
 
         assert_eq!(running_iseq, target_blockid.iseq as _, "each stub expects a particular iseq");
 
