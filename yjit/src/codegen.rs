@@ -270,10 +270,8 @@ fn jit_save_pc(jit: &JITState, asm: &mut Assembler) {
     };
 
     asm.comment("save PC to CFP");
-    //asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_PC), Opnd::const_ptr(ptr as *const u8));
+    asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_PC), Opnd::const_ptr(ptr as *const u8));
     //asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
-    let jit_frame = unsafe { rb_yjit_frame_new(ptr as _) };
-    asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), Opnd::const_ptr(jit_frame as _));
 }
 
 /// Save the current SP on the CFP
@@ -293,8 +291,9 @@ fn gen_save_sp(asm: &mut Assembler) {
     }
 }
 
-/// jit_save_pc() + gen_save_sp(). Should be used before calling a routine that
-/// could:
+/// For calling routines in the middle of a YARV instruction that will
+/// fall through to the next instruction in the same ISeq.
+/// Should be used before calling a routine that could:
 ///  - Perform GC allocation
 ///  - Take the VM lock through RB_VM_LOCK_ENTER()
 ///  - Perform Ruby method call
@@ -304,15 +303,20 @@ fn jit_prepare_routine_call(
 ) {
     jit.record_boundary_patch_point = true;
 
-    jit_save_pc(jit, asm);
-    //let jit_frame = unsafe { rb_yjit_frame_new(jit.get_pc() as _) };
-    //asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), Opnd::const_ptr(jit_frame as _));
-
-    gen_save_sp(asm);
+    jit_bump_progress(jit, asm);
 
     // In case the routine calls Ruby methods, it can set local variables
     // through Kernel#binding and other means.
     asm.ctx.clear_local_types();
+}
+
+fn jit_bump_progress(jit: &mut JITState, asm: &mut Assembler) {
+    asm.comment("progress point bump");
+
+    asm.spill_temps();
+
+    let jit_frame = unsafe { rb_yjit_frame_new(jit.get_pc() as _, asm.ctx.get_sp_offset().into()) };
+    asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), Opnd::const_ptr(jit_frame as _));
 }
 
 /// Record the current codeblock write position for rewriting into a jump into
@@ -3995,9 +3999,8 @@ fn gen_throw(
 
     // THROW_DATA_NEW allocates. Save SP for GC and PC for allocation tracing as
     // well as handling the catch table. However, not using jit_prepare_routine_call
-    // since we don't need a patch point for this implementation.
-    jit_save_pc(jit, asm);
-    gen_save_sp(asm);
+    // since we are leaving and won't continue in the running ISeq.
+    jit_bump_progress(jit, asm);
 
     // rb_vm_throw verifies it's a valid throw, sets ec->tag->state, and returns throw
     // data, which is throwobj or a vm_throw_data wrapping it. When ec->tag->state is
@@ -5211,11 +5214,11 @@ fn gen_push_frame(
     // For an iseq call PC may be None, in which case we will not set PC and will allow jitted code
     // to set it as necessary.
     if let Some(pc) = frame.pc {
-        let jit_frame = unsafe { rb_yjit_frame_new(pc as _) } as usize;
-        asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), jit_frame.into());
-        //asm.mov(cfp_opnd(RUBY_OFFSET_CFP_PC), pc.into());
+        //let jit_frame = unsafe { rb_yjit_frame_new(pc as _) } as usize;
+        //asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), jit_frame.into());
+        asm.mov(cfp_opnd(RUBY_OFFSET_CFP_PC), pc.into());
     } else {
-        asm.mov(cfp_opnd(RUBY_OFFSET_CFP_PC), 0.into());
+        //asm.mov(cfp_opnd(RUBY_OFFSET_CFP_PC), 0.into());
         //asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
     };
     //asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
@@ -5430,6 +5433,8 @@ fn gen_send_cfunc(
 
     // Store incremented PC into current control frame in case callee raises.
     jit_save_pc(jit, asm);
+    // TODO(outline): unpaired. This could be a bump even though it doesn't need to?
+    asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
 
     // Increment the stack pointer by 3 (in the callee)
     // sp += 3
@@ -5483,6 +5488,8 @@ fn gen_send_cfunc(
     // Write interpreter SP into CFP.
     // Needed in case the callee yields to the block.
     gen_save_sp(asm);
+    // TODO(outline): this acts on the caller's frame and could pair with jit_save_pc() above
+    //                modulo argument passing complications.
 
     // Non-variadic method
     let args = if cfunc_argc >= 0 {
@@ -6129,8 +6136,7 @@ fn gen_send_iseq(
 
     if iseq_has_rest {
         // We are going to allocate so setting pc and sp.
-        jit_save_pc(jit, asm);
-        gen_save_sp(asm);
+        jit_bump_progress(jit, asm);
 
         let rest_param_array = if flags & VM_CALL_ARGS_SPLAT != 0 {
             let non_rest_arg_count = argc - 1;
@@ -6463,6 +6469,8 @@ fn gen_send_iseq(
 
     // Store the next PC in the current frame
     jit_save_pc(jit, asm);
+    // TODO(outline): ^^^^ this and the sp motion above should become a jit_progress_bump() later
+    asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
 
     // Adjust the callee's stack pointer
     let offs = (SIZEOF_VALUE as isize) * (

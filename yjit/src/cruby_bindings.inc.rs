@@ -1371,5 +1371,5 @@ extern "C" {
         leave_exit: *mut ::std::os::raw::c_void,
         leave_exception: *mut ::std::os::raw::c_void,
     );
-    pub fn rb_yjit_frame_new(pc: *mut VALUE) -> *mut rb_jit_frame_t;
+    pub fn rb_yjit_frame_new(pc: *mut VALUE, sp_offset: i32) -> *mut rb_jit_frame_t;
 }
