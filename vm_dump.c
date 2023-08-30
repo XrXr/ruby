@@ -1085,7 +1085,9 @@ rb_vm_bugreport(const void *ctx)
 #if USE_BACKTRACE || defined(_WIN32)
     fprintf(stderr, "-- C level backtrace information "
             "-------------------------------------------\n");
-    rb_print_backtrace();
+    //rb_print_backtrace();
+void rb_dump_stacktrace(void);
+rb_dump_stacktrace();
 
 
     fprintf(stderr, "\n");
