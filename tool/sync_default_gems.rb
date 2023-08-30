@@ -81,7 +81,7 @@ module SyncDefaultGems
     yaml: "ruby/yaml",
     yarp: ["ruby/yarp", "main"],
     zlib: 'ruby/zlib',
-  }.transform_keys {|k| k.to_s}
+  }.transform_keys(&:to_s)
 
   CLASSICAL_DEFAULT_BRANCH = "master"
 
@@ -122,9 +122,10 @@ module SyncDefaultGems
   end
 
   def replace_rdoc_ref_all
-    result = pipe_readlines(%W"git status porcelain -z -- *.c *.rb *.rdoc")
+    result = pipe_readlines(%W"git status --porcelain -z -- *.c *.rb *.rdoc")
     result.map! {|line| line[/\A.M (.*)/, 1]}
     result.compact!
+    return if result.empty?
     result = pipe_readlines(%W"git grep -z -l -F [https://docs.ruby-lang.org/en/master/ --" + result)
     result.inject(false) {|changed, file| changed | replace_rdoc_ref(file)}
   end
@@ -416,6 +417,7 @@ module SyncDefaultGems
 
       cp_r("#{upstream}/config.yml", "yarp/")
       cp_r("#{upstream}/templates", "yarp/")
+      rm_rf("yarp/templates/java")
 
       rm("yarp/extconf.rb")
       mv("yarp_init.c", "yarp/")
