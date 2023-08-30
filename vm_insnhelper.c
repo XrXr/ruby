@@ -4753,7 +4753,6 @@ vm_yield_with_cfunc(rb_execution_context_t *ec,
     VALUE val, arg, blockarg;
     int frame_flag;
     const struct vm_ifunc *ifunc = captured->code.ifunc;
-    ASSERT_FRAME_MATERIALIZED(ec->cfp);
 
     if (is_lambda) {
         arg = rb_ary_new4(argc, argv);
@@ -4777,7 +4776,7 @@ vm_yield_with_cfunc(rb_execution_context_t *ec,
                   self,
                   VM_GUARDED_PREV_EP(captured->ep),
                   (VALUE)me,
-                  0, ec->cfp->_sp, 0, 0);
+                  0, CFP_SP(ec->cfp), 0, 0);
     val = (*ifunc->func)(arg, (VALUE)ifunc->data, argc, argv, blockarg);
     rb_vm_pop_frame(ec);
 
