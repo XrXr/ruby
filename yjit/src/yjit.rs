@@ -45,13 +45,6 @@ pub fn yjit_enabled_p() -> bool {
     YJIT_ENABLED.load(Ordering::Acquire)
 }
 
-#[no_mangle]
-pub extern "C" fn rb_dump_stacktrace() {
-    let trace = std::backtrace::Backtrace::force_capture();
-    eprint!("{trace}");
-}
-
-
 /// Test whether we are ready to compile an ISEQ or not
 #[no_mangle]
 pub extern "C" fn rb_yjit_threshold_hit(_iseq: IseqPtr, total_calls: u64) -> bool {
