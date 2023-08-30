@@ -456,7 +456,7 @@ fn gen_exit(exit_pc: *mut VALUE, asm: &mut Assembler) {
 
     // Generate the code to exit to the interpreters
     // Write the adjusted SP back into the CFP
-    if asm.ctx.get_sp_offset() != 0 {
+    if true /* REG_SP and cfp->sp aren't in sync anymore with outlining */ {
         let sp_opnd = asm.lea(asm.ctx.sp_opnd(0));
         asm.mov(
             Opnd::mem(64, CFP, RUBY_OFFSET_CFP_SP),
