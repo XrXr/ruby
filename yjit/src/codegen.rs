@@ -315,7 +315,13 @@ fn jit_bump_progress(jit: &mut JITState, asm: &mut Assembler) {
 
     asm.spill_temps();
 
-    let jit_frame = unsafe { rb_yjit_frame_new(jit.get_pc() as _, asm.ctx.get_stack_size().into()) };
+    let pc = jit.get_pc();
+    let next_pc: *mut VALUE = unsafe {
+        let cur_insn_len = insn_len(jit.get_opcode());
+        pc.add(cur_insn_len.as_usize())
+    };
+
+    let jit_frame = unsafe { rb_yjit_frame_new(next_pc, asm.ctx.get_stack_size().into()) };
     asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), Opnd::const_ptr(jit_frame as _));
 }
 
