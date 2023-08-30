@@ -5223,7 +5223,7 @@ fn gen_push_frame(
         //asm.mov(cfp_opnd(RUBY_OFFSET_CFP_PC), 0.into());
         //asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
     };
-    //asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
+    asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
     asm.mov(cfp_opnd(RUBY_OFFSET_CFP_SP), sp);
     let iseq: Opnd = if let Some(iseq) = frame.iseq {
         VALUE::from(iseq).into()
