@@ -280,7 +280,7 @@ fn jit_save_pc(jit: &JITState, asm: &mut Assembler) {
 ///       which could invalidate memory operands
 fn gen_save_sp(asm: &mut Assembler) {
     asm.spill_temps();
-    if asm.ctx.get_sp_offset() != 0 {
+    if true /* REG_SP and cfp->sp aren't in sync anymore with outlining */ {
         asm.comment("save SP to CFP");
         let stack_pointer = asm.ctx.sp_opnd(0);
         let sp_addr = asm.lea(stack_pointer);
