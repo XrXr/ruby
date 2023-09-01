@@ -730,7 +730,7 @@ set_compile_option_from_hash(rb_compile_option_t *option, VALUE opt)
       else if (flag == Qfalse)  { (o)->mem = 0; } \
   }
 #define SET_COMPILE_OPTION_NUM(o, h, mem) \
-  { VALUE num = rb_hash_aref(opt, ID2SYM(rb_intern(#mem))); \
+  { VALUE num = rb_hash_aref((h), ID2SYM(rb_intern(#mem))); \
       if (!NIL_P(num)) (o)->mem = NUM2INT(num); \
   }
     SET_COMPILE_OPTION(option, opt, inline_const_cache);
@@ -747,20 +747,15 @@ set_compile_option_from_hash(rb_compile_option_t *option, VALUE opt)
 #undef SET_COMPILE_OPTION_NUM
 }
 
-static VALUE
-make_compile_option_from_ast(const rb_ast_body_t *ast)
+static rb_compile_option_t *
+set_compile_option_from_ast(rb_compile_option_t *option, const rb_ast_body_t *ast)
 {
-    VALUE opt = rb_obj_hide(rb_ident_hash_new());
-    if (ast->frozen_string_literal >= 0) rb_hash_aset(opt, rb_sym_intern_ascii_cstr("frozen_string_literal"), RBOOL(ast->frozen_string_literal));
-    if (ast->coverage_enabled >= 0) rb_hash_aset(opt, rb_sym_intern_ascii_cstr("coverage_enabled"), RBOOL(ast->coverage_enabled));
-    return opt;
-}
-
-static void
-rb_iseq_make_compile_option(rb_compile_option_t *option, VALUE opt)
-{
-    Check_Type(opt, T_HASH);
-    set_compile_option_from_hash(option, opt);
+#define SET_COMPILE_OPTION(o, a, mem) \
+    ((a)->mem < 0 ? 0 : ((o)->mem = (a)->mem > 0))
+    SET_COMPILE_OPTION(option, ast, frozen_string_literal);
+    SET_COMPILE_OPTION(option, ast, coverage_enabled);
+#undef SET_COMPILE_OPTION
+    return option;
 }
 
 static void
@@ -916,13 +911,11 @@ rb_iseq_new_with_opt(const rb_ast_body_t *ast, VALUE name, VALUE path, VALUE rea
     rb_iseq_t *iseq = iseq_alloc();
     rb_compile_option_t new_opt;
 
-    if (option) {
+    if (!option) option = &COMPILE_OPTION_DEFAULT;
+    if (ast) {
         new_opt = *option;
+        option = set_compile_option_from_ast(&new_opt, ast);
     }
-    else {
-        new_opt = COMPILE_OPTION_DEFAULT;
-    }
-    if (ast) rb_iseq_make_compile_option(&new_opt, make_compile_option_from_ast(ast));
 
     VALUE script_lines = Qnil;
 
@@ -934,7 +927,7 @@ rb_iseq_new_with_opt(const rb_ast_body_t *ast, VALUE name, VALUE path, VALUE rea
     }
 
     prepare_iseq_build(iseq, name, path, realpath, first_lineno, node ? &node->nd_loc : NULL, node ? nd_node_id(node) : -1,
-                       parent, isolated_depth, type, script_lines, &new_opt);
+                       parent, isolated_depth, type, script_lines, option);
 
     rb_iseq_compile_node(iseq, node);
     finish_iseq_build(iseq);
@@ -950,18 +943,10 @@ yp_iseq_new_with_opt(yp_node_t *node, yp_parser_t *parser, VALUE name, VALUE pat
                      enum rb_iseq_type type, const rb_compile_option_t *option)
 {
     rb_iseq_t *iseq = iseq_alloc();
-    rb_compile_option_t new_opt;
-
-    if (option) {
-        new_opt = *option;
-    }
-    else {
-        new_opt = COMPILE_OPTION_DEFAULT;
-    }
-
     VALUE script_lines = Qnil;
-
     rb_code_location_t code_loc;
+
+    if (!option) option = &COMPILE_OPTION_DEFAULT;
 
     if (node) {
         yp_line_column_t start_line_col = yp_newline_list_line_column(&(parser->newline_list), node->location.start);
@@ -981,7 +966,7 @@ yp_iseq_new_with_opt(yp_node_t *node, yp_parser_t *parser, VALUE name, VALUE pat
     // TODO: node_id
     int node_id = -1;
     prepare_iseq_build(iseq, name, path, realpath, first_lineno, &code_loc, node_id,
-            parent, isolated_depth, type, script_lines, &new_opt);
+            parent, isolated_depth, type, script_lines, option);
 
     rb_iseq_compile_yarp_node(iseq, node, parser);
 

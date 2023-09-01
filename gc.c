@@ -2392,7 +2392,7 @@ gc_continue(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *heap)
     gc_enter(objspace, gc_enter_event_continue, &lock_lev);
 
     /* Continue marking if in incremental marking. */
-    if (heap->free_pages == NULL && is_incremental_marking(objspace)) {
+    if (is_incremental_marking(objspace)) {
         if (gc_marks_continue(objspace, size_pool, heap)) {
             gc_sweep(objspace);
         }
@@ -6902,6 +6902,16 @@ rb_gc_mark_weak(VALUE *ptr)
     if (RB_SPECIAL_CONST_P(obj)) return;
 
     GC_ASSERT(objspace->rgengc.parent_object == 0 || FL_TEST(objspace->rgengc.parent_object, FL_WB_PROTECTED));
+
+    /* If we are in a minor GC and the other object is old, then obj should
+     * already be marked and cannot be reclaimed in this GC cycle so we don't
+     * need to add it to the weak refences list. */
+    if (!is_full_marking(objspace) && RVALUE_OLD_P(obj)) {
+        GC_ASSERT(RVALUE_MARKED(obj));
+        GC_ASSERT(!objspace->flags.during_compacting);
+
+        return;
+    }
 
     rgengc_check_relation(objspace, obj);
 
