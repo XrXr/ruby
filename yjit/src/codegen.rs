@@ -278,6 +278,7 @@ fn jit_save_pc(jit: &JITState, asm: &mut Assembler) {
 /// This realigns the interpreter SP with the JIT SP
 /// Note: this will change the current value of REG_SP,
 ///       which could invalidate memory operands
+#[cfg(any())]
 fn gen_save_sp(asm: &mut Assembler) {
     asm.spill_temps();
     if true /* REG_SP and cfp->sp aren't in sync anymore with outlining */ {
@@ -5439,11 +5440,6 @@ fn gen_send_cfunc(
     // Points to the receiver operand on the stack
     let recv = asm.stack_opnd(argc);
 
-    // Store incremented PC into current control frame in case callee raises.
-    jit_save_pc(jit, asm);
-    // TODO(outline): unpaired. This could be a bump even though it doesn't need to?
-    asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
-
     // Increment the stack pointer by 3 (in the callee)
     // sp += 3
     let sp = asm.lea(asm.ctx.sp_opnd((SIZEOF_VALUE as isize) * 3));
@@ -5493,11 +5489,9 @@ fn gen_send_cfunc(
     // Pop the C function arguments from the stack (in the caller)
     asm.stack_pop((argc + 1).try_into().unwrap());
 
-    // Write interpreter SP into CFP.
-    // Needed in case the callee yields to the block.
-    gen_save_sp(asm);
-    // TODO(outline): this acts on the caller's frame and could pair with jit_save_pc() above
-    //                modulo argument passing complications.
+    // Progress bump in the _caller_. Even though we've pushed
+    // a cfunc control frame, the CFP register points to the caller.
+    jit_bump_progress(jit, asm);
 
     // Non-variadic method
     let args = if cfunc_argc >= 0 {
