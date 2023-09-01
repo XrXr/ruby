@@ -274,24 +274,6 @@ fn jit_save_pc(jit: &JITState, asm: &mut Assembler) {
     //asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
 }
 
-/// Save the current SP on the CFP
-/// This realigns the interpreter SP with the JIT SP
-/// Note: this will change the current value of REG_SP,
-///       which could invalidate memory operands
-#[cfg(any())]
-fn gen_save_sp(asm: &mut Assembler) {
-    asm.spill_temps();
-    if true /* REG_SP and cfp->sp aren't in sync anymore with outlining */ {
-        asm.comment("save SP to CFP");
-        let stack_pointer = asm.ctx.sp_opnd(0);
-        let sp_addr = asm.lea(stack_pointer);
-        asm.mov(SP, sp_addr);
-        let cfp_sp_opnd = Opnd::mem(64, CFP, RUBY_OFFSET_CFP_SP);
-        asm.mov(cfp_sp_opnd, SP);
-        asm.ctx.set_sp_offset(0);
-    }
-}
-
 /// For calling routines in the middle of a YARV instruction that will
 /// fall through to the next instruction in the same ISeq.
 /// Should be used before calling a routine that could:
@@ -6472,6 +6454,8 @@ fn gen_send_iseq(
     // Store the next PC in the current frame
     jit_save_pc(jit, asm);
     // TODO(outline): ^^^^ this and the sp motion above should become a jit_progress_bump() later
+    //               but it's hard because gen_leave() reads from cfp->_sp directly to restore
+    //               REG_SP when callee pops
     asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
 
     // Adjust the callee's stack pointer
