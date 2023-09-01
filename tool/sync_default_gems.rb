@@ -447,15 +447,7 @@ module SyncDefaultGems
 
     # Gem-specific patterns
     case gem
-    when "yarp"
-      %r[\A(?:
-        Makefile\.in
-        |configure\.ac
-        |fuzz/.*
-        |rust/.*
-        |tasks/.*
-        |ext/yarp/extconf\.rb
-      )\z]mx
+    when nil
     end&.tap do |pattern|
       patterns << pattern
     end
@@ -527,43 +519,9 @@ module SyncDefaultGems
   #++
 
   def resolve_conflicts(gem, sha, edit)
-    # Forcibly remove any files that we don't want to copy to this repository.
-    # We also ignore them as new `toplevels` even when they don't conflict.
-    ignored_paths = []
-    case gem
-    when "rubygems"
-      # We don't copy any vcr_cassettes to this repository. Because the directory does not
-      # exist, rename detection doesn't work. So it starts with the original path `bundler/`.
-      ignored_paths += %w[bundler/spec/support/artifice/vcr_cassettes]
-    when "yarp"
-      # Rename detection never works between ruby/ruby/doc and ruby/yarp/docs
-      # since ruby/ruby/doc is not something owned by YARP.
-      ignored_paths += %w[docs/]
-    end
-    ignored_paths.each do |path|
-      if File.exist?(path)
-        puts "Removing: #{path}"
-        system("git", "reset", path)
-        rm_rf(path)
-      end
-    end
-
-    # git has inexact rename detection, so they follow directory renames even for new files.
-    # However, new files are considered a `CONFLICT (file location)`, so you need to git-add them here.
-    # We hope that they are not other kinds of conflicts, assuming we don't modify them in this repository.
-    case gem
-    when "rubygems"
-      system(*%w[git add spec/bundler])
-    when "yarp"
-      system(*%w[git add lib/yarp])
-      system(*%w[git add test/yarp])
-      system(*%w[git add yarp])
-    end
-
     # Skip this commit if everything has been removed as `ignored_paths`.
     changes = pipe_readlines(%W"git status --porcelain -z")
     if changes.empty?
-      `git reset` && `git checkout .` && `git clean -fd`
       puts "Skip empty commit #{sha}"
       return false
     end
@@ -572,23 +530,16 @@ module SyncDefaultGems
     deleted = changes.grep(/^DD /) {$'}
     system(*%W"git rm -f --", *deleted) unless deleted.empty?
 
+    # Import UA: added by them
+    added = changes.grep(/^UA /) {$'}
+    system(*%W"git add --", *added) unless added.empty?
+
     # Discover unmerged files
     # AU: unmerged, added by us
     # DU: unmerged, deleted by us
     # UU: unmerged, both modified
-    # UA: unmerged, added by them
     # AA: unmerged, both added
-    unmerged = changes.map {|line| line[/\A(?:.U|[UA]A) (.*)/, 1]}
-    unmerged.compact!
-    ignore_file_pattern = ignore_file_pattern_for(gem)
-    ignore, conflict = unmerged.partition {|name| ignore_file_pattern =~ name}
-    # Reset ignored files if they conflict
-    unless ignore.empty?
-      system(*%W"git reset HEAD --", *ignore)
-      File.unlink(*ignore)
-      ignore = pipe_readlines(%W"git status --porcelain -z" + ignore).map! {|line| line[/\A.. (.*)/, 1]}
-      system(*%W"git checkout HEAD --", *ignore) unless ignore.empty?
-    end
+    conflict = changes.grep(/\A(?:.U|AA) /) {$'}
     # If -e option is given, open each conflicted file with an editor
     unless conflict.empty?
       if edit
@@ -598,52 +549,73 @@ module SyncDefaultGems
         end
         if editor
           system([editor, conflict].join(' '))
+          return system(*%w"git add --", *conflict)
         end
       end
+      return false
     end
 
-    # Attempt to commit the cherry-pick
-    system({"GIT_EDITOR"=>"true"}, *%W"git cherry-pick --no-edit --continue") || nil
+    return true
   end
 
-  def remove_toplevel_addtions(gem, sha)
-    # Forcibly remove any new top-level entries, and any changes under
-    # /test/fixtures, /test/lib, or /tool.
-    changed = pipe_readlines(%W"git diff --name-only -z HEAD~..HEAD --")
-    toplevels = changed.map {|f| f[%r[\A(?!tool/)[^/]+/?]]}.compact
-    toplevels.delete_if do |top|
-      if system(*%w"git checkout -f HEAD~ --", top, err: File::NULL)
-        # previously existent path
-        system(*%w"git checkout -f HEAD --", top, out: File::NULL)
+  def filter_pickup_files(changed, ignore_file_pattern, base)
+    toplevels = {}
+    remove = []
+    ignore = []
+    changed = changed.reject do |f|
+      case
+      when toplevels.fetch(top = f[%r[\A[^/]+(?=/|\z)]m]) {
+             remove << top unless
+               toplevels[top] = system(*%w"git cat-file -e", "#{base}:#{top}", err: File::NULL)
+           }
+        # Remove any new top-level directories.
         true
+      when !f.include?("/"),
+           f.start_with?("test/fixtures/", "test/lib/", "tool/")
+        # Forcibly reset any top-level entries, and any changes under
+        # /test/fixtures, /test/lib, or /tool.
+        ignore << f
+      when ignore_file_pattern.match?(f)
+        # Forcibly reset any changes matching ignore_file_pattern.
+        ignore << f
       end
     end
-    unless toplevels.empty?
-      puts "Remove files added to toplevel: #{toplevels.join(', ')}"
-      system(*%w"git rm -r --", *toplevels)
+    return changed, remove, ignore
+  end
+
+  def pickup_files(gem, changed, picked)
+    # Forcibly remove any files that we don't want to copy to this
+    # repository.
+
+    ignore_file_pattern = ignore_file_pattern_for(gem)
+
+    base = picked ? "HEAD~" : "HEAD"
+    changed, remove, ignore = filter_pickup_files(changed, ignore_file_pattern, base)
+
+    unless remove.empty?
+      puts "Remove added files: #{remove.join(', ')}"
+      system(*%w"git rm -fr --", *remove)
+      if picked
+        system(*%w"git commit --amend --no-edit --", *remove, %i[out err] => File::NULL)
+      end
     end
-    tools = changed.select {|f|f.start_with?("test/fixtures/", "test/lib/", "tool/")}
-    unless tools.empty?
-      system(*%W"git rm -r --", *tools)
-      system(*%W"git checkout HEAD~ --", *tools)
+
+    unless ignore.empty?
+      puts "Reset ignored files: #{ignore.join(', ')}"
+      system(*%W"git checkout -f", base, "--", *ignore)
     end
-    if toplevels.empty? and tools.empty?
-      return true
-    elsif system(*%W"git diff --quiet HEAD~")
-      `git reset HEAD~ --` && `git checkout .` && `git clean -fd`
-      puts "Skip commit #{sha} only for tools or toplevel"
-      return false
-    elsif system(*%W"git commit --amend --no-edit --", *toplevels, *tools)
-      return true
-    else
-      `git reset HEAD~ --` && `git checkout .` && `git clean -fd`
+
+    if changed.empty?
       return nil
     end
+
+    return changed
   end
 
   def pickup_commit(gem, sha, edit)
     # Attempt to cherry-pick a commit
     result = IO.popen(%W"git cherry-pick #{sha}", &:read)
+    picked = $?.success?
     if result =~ /nothing\ to\ commit/
       `git reset`
       puts "Skip empty commit #{sha}"
@@ -655,14 +627,36 @@ module SyncDefaultGems
       return false
     end
 
-    # Skip the commit if it's empty or the cherry-pick attempt failed
-    if  /^CONFLICT/ =~ result and !resolve_conflicts(gem, sha, edit)
-      `git reset` && `git checkout .` && `git clean -fd`
-      return nil
+    if picked
+      changed = pipe_readlines(%w"git diff-tree --name-only -r -z HEAD~..HEAD --")
+    else
+      changed = pipe_readlines(%w"git diff --name-only -r -z HEAD --")
     end
 
-    result = remove_toplevel_addtions(gem, sha)
-    return result unless result
+    # Pick up files to merge.
+    unless changed = pickup_files(gem, changed, picked)
+      puts "Skip commit #{sha} only for tools or toplevel"
+      if picked
+        `git reset --hard HEAD~`
+      else
+        `git cherry-pick --abort`
+      end
+      return false
+    end
+
+    # If the cherry-pick attempt failed, try to resolve conflicts.
+    # Skip the commit, if it contains unresolved conflicts or no files to pick up.
+    unless picked or resolve_conflicts(gem, sha, edit)
+      `git reset` && `git checkout .` && `git clean -fd`
+      return picked || nil      # Fail unless cherry-picked
+    end
+
+    # Commit cherry-picked commit
+    if picked
+      system(*%w"git commit --amend --no-edit")
+    else
+      system(*%w"git cherry-pick --continue --no-edit")
+    end or return nil
 
     # Amend the commit if RDoc references need to be replaced
     head = `git log --format=%H -1 HEAD`.chomp
@@ -695,10 +689,8 @@ module SyncDefaultGems
     commits = commits_in_ranges(gem, repo, default_branch, ranges)
 
     # Ignore Merge commits and already-merged commits.
-    ignore_file_pattern = ignore_file_pattern_for(gem)
     commits.delete_if do |sha, subject|
-      files = pipe_readlines(%W"git diff-tree -z --no-commit-id --name-only -r #{sha}")
-      subject.start_with?("Merge", "Auto Merge") or files.all?(ignore_file_pattern)
+      subject.start_with?("Merge", "Auto Merge")
     end
 
     if commits.empty?
