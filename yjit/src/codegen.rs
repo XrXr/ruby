@@ -5452,7 +5452,6 @@ fn gen_send_cfunc(
     });
 
     // Pop the C function arguments from the stack (in the caller)
-    asm.spill_temps();
     asm.stack_pop((argc + 1).try_into().unwrap());
 
     // Progress bump in the _caller_. Even though we've pushed
