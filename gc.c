@@ -955,7 +955,7 @@ struct heap_page {
     struct {
         unsigned int before_sweep : 1;
         unsigned int has_remembered_objects : 1;
-        unsigned int has_uncollectible_shady_objects : 1;
+        unsigned int has_uncollectible_wb_unprotected_objects : 1;
         unsigned int in_tomb : 1;
     } flags;
 
@@ -1233,6 +1233,7 @@ total_freed_objects(rb_objspace_t *objspace)
 #define is_incremental_marking(objspace) ((objspace)->flags.during_incremental_marking != FALSE)
 #define will_be_incremental_marking(objspace) ((objspace)->rgengc.need_major_gc != GPR_FLAG_NONE)
 #define GC_INCREMENTAL_SWEEP_SLOT_COUNT 2048
+#define GC_INCREMENTAL_SWEEP_POOL_SLOT_COUT 1024
 #define is_lazy_sweeping(objspace)           (GC_ENABLE_LAZY_SWEEP && has_sweeping_pages(objspace))
 
 #if SIZEOF_LONG == SIZEOF_VOIDP
@@ -2057,7 +2058,7 @@ heap_pages_free_unused_pages(rb_objspace_t *objspace)
     }
 
     if (has_pages_in_tomb_heap) {
-        for (i = j = 1; j < heap_allocated_pages; i++) {
+        for (i = j = 0; j < heap_allocated_pages; i++) {
             struct heap_page *page = heap_pages_sorted[i];
 
             if (page->flags.in_tomb && page->free_slots == page->total_slots) {
@@ -2076,6 +2077,11 @@ heap_pages_free_unused_pages(rb_objspace_t *objspace)
         uintptr_t himem = (uintptr_t)hipage->start + (hipage->total_slots * hipage->slot_size);
         GC_ASSERT(himem <= heap_pages_himem);
         heap_pages_himem = himem;
+
+        struct heap_page *lopage = heap_pages_sorted[0];
+        uintptr_t lomem = (uintptr_t)lopage->start;
+        GC_ASSERT(lomem >= heap_pages_lomem);
+        heap_pages_lomem = lomem;
 
         GC_ASSERT(j == heap_allocated_pages);
     }
@@ -5781,9 +5787,7 @@ gc_sweep_step(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *hea
     struct heap_page *sweep_page = heap->sweeping_page;
     int unlink_limit = GC_SWEEP_PAGES_FREEABLE_PER_STEP;
     int swept_slots = 0;
-    bool need_pool = TRUE;
-
-    gc_report(2, objspace, "gc_sweep_step (need_pool: %d)\n", need_pool);
+    int pooled_slots = 0;
 
     if (sweep_page == NULL) return FALSE;
 
@@ -5818,9 +5822,9 @@ gc_sweep_step(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *hea
             size_pool->freed_slots += ctx.freed_slots;
             size_pool->empty_slots += ctx.empty_slots;
 
-            if (need_pool) {
+            if (pooled_slots < GC_INCREMENTAL_SWEEP_POOL_SLOT_COUT) {
                 heap_add_poolpage(objspace, heap, sweep_page);
-                need_pool = FALSE;
+                pooled_slots += free_slots;
             }
             else {
                 heap_add_freepage(heap, sweep_page);
@@ -6734,7 +6738,7 @@ gc_remember_unprotected(rb_objspace_t *objspace, VALUE obj)
     bits_t *uncollectible_bits = &page->uncollectible_bits[0];
 
     if (!MARKED_IN_BITMAP(uncollectible_bits, obj)) {
-        page->flags.has_uncollectible_shady_objects = TRUE;
+        page->flags.has_uncollectible_wb_unprotected_objects = TRUE;
         MARK_IN_BITMAP(uncollectible_bits, obj);
         objspace->rgengc.uncollectible_wb_unprotected_objects++;
 
@@ -6903,6 +6907,11 @@ rb_gc_mark_weak(VALUE *ptr)
 
     GC_ASSERT(objspace->rgengc.parent_object == 0 || FL_TEST(objspace->rgengc.parent_object, FL_WB_PROTECTED));
 
+    if (UNLIKELY(RB_TYPE_P(obj, T_NONE))) {
+        rp(obj);
+        rb_bug("try to mark T_NONE object");
+    }
+
     /* If we are in a minor GC and the other object is old, then obj should
      * already be marked and cannot be reclaimed in this GC cycle so we don't
      * need to add it to the weak refences list. */
@@ -6918,6 +6927,27 @@ rb_gc_mark_weak(VALUE *ptr)
     rb_darray_append_without_gc(&objspace->weak_references, ptr);
 
     objspace->profile.weak_references_count++;
+}
+
+void
+rb_gc_remove_weak(VALUE parent_obj, VALUE *ptr)
+{
+    rb_objspace_t *objspace = &rb_objspace;
+
+    /* If we're not incremental marking, then the state of the objects can't
+     * change so we don't need to do anything. */
+    if (!is_incremental_marking(objspace)) return;
+    /* If parent_obj has not been marked, then ptr has not yet been marked
+     * weak, so we don't need to do anything. */
+    if (!RVALUE_MARKED(parent_obj)) return;
+
+    VALUE **ptr_ptr;
+    rb_darray_foreach(objspace->weak_references, i, ptr_ptr) {
+        if (*ptr_ptr == ptr) {
+            *ptr_ptr = NULL;
+            break;
+        }
+    }
 }
 
 /* CAUTION: THIS FUNCTION ENABLE *ONLY BEFORE* SWEEPING.
@@ -7847,7 +7877,7 @@ gc_verify_heap_page(rb_objspace_t *objspace, struct heap_page *page, VALUE obj)
                (void *)page, remembered_old_objects, obj ? obj_info(obj) : "");
     }
 
-    if (page->flags.has_uncollectible_shady_objects == FALSE && has_remembered_shady == TRUE) {
+    if (page->flags.has_uncollectible_wb_unprotected_objects == FALSE && has_remembered_shady == TRUE) {
         rb_bug("page %p's has_remembered_shady should be false, but there are remembered shady objects. %s",
                (void *)page, obj ? obj_info(obj) : "");
     }
@@ -8147,6 +8177,8 @@ gc_update_weak_references(rb_objspace_t *objspace)
     size_t retained_weak_references_count = 0;
     VALUE **ptr_ptr;
     rb_darray_foreach(objspace->weak_references, i, ptr_ptr) {
+        if (!ptr_ptr) continue;
+
         VALUE obj = **ptr_ptr;
 
         if (RB_SPECIAL_CONST_P(obj)) continue;
@@ -8709,16 +8741,16 @@ rgengc_rememberset_mark(rb_objspace_t *objspace, rb_heap_t *heap)
     gc_report(1, objspace, "rgengc_rememberset_mark: start\n");
 
     ccan_list_for_each(&heap->pages, page, page_node) {
-        if (page->flags.has_remembered_objects | page->flags.has_uncollectible_shady_objects) {
+        if (page->flags.has_remembered_objects | page->flags.has_uncollectible_wb_unprotected_objects) {
             uintptr_t p = page->start;
             bits_t bitset, bits[HEAP_PAGE_BITMAP_LIMIT];
             bits_t *remembered_bits = page->remembered_bits;
             bits_t *uncollectible_bits = page->uncollectible_bits;
             bits_t *wb_unprotected_bits = page->wb_unprotected_bits;
 #if PROFILE_REMEMBERSET_MARK
-            if (page->flags.has_remembered_objects && page->flags.has_uncollectible_shady_objects) has_both++;
+            if (page->flags.has_remembered_objects && page->flags.has_uncollectible_wb_unprotected_objects) has_both++;
             else if (page->flags.has_remembered_objects) has_old++;
-            else if (page->flags.has_uncollectible_shady_objects) has_shady++;
+            else if (page->flags.has_uncollectible_wb_unprotected_objects) has_shady++;
 #endif
             for (j=0; j<HEAP_PAGE_BITMAP_LIMIT; j++) {
                 bits[j] = remembered_bits[j] | (uncollectible_bits[j] & wb_unprotected_bits[j]);
@@ -8761,7 +8793,7 @@ rgengc_mark_and_rememberset_clear(rb_objspace_t *objspace, rb_heap_t *heap)
         memset(&page->marking_bits[0],    0, HEAP_PAGE_BITMAP_SIZE);
         memset(&page->remembered_bits[0], 0, HEAP_PAGE_BITMAP_SIZE);
         memset(&page->pinned_bits[0],     0, HEAP_PAGE_BITMAP_SIZE);
-        page->flags.has_uncollectible_shady_objects = FALSE;
+        page->flags.has_uncollectible_wb_unprotected_objects = FALSE;
         page->flags.has_remembered_objects = FALSE;
     }
 }
@@ -10612,7 +10644,7 @@ gc_ref_update(void *vstart, void *vend, size_t stride, rb_objspace_t * objspace,
     VALUE v = (VALUE)vstart;
     asan_unlock_freelist(page);
     asan_lock_freelist(page);
-    page->flags.has_uncollectible_shady_objects = FALSE;
+    page->flags.has_uncollectible_wb_unprotected_objects = FALSE;
     page->flags.has_remembered_objects = FALSE;
 
     /* For each object on the page */
@@ -10626,7 +10658,7 @@ gc_ref_update(void *vstart, void *vend, size_t stride, rb_objspace_t * objspace,
             break;
           default:
             if (RVALUE_WB_UNPROTECTED(v)) {
-                page->flags.has_uncollectible_shady_objects = TRUE;
+                page->flags.has_uncollectible_wb_unprotected_objects = TRUE;
             }
             if (RVALUE_REMEMBERED(v)) {
                 page->flags.has_remembered_objects = TRUE;

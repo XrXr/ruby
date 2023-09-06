@@ -17,12 +17,13 @@ module YARP
       expected = ModuleNode(
         [],
         Location(),
-        ConstantReadNode(),
+        ConstantReadNode(:Parent),
         StatementsNode(
-          [ModuleNode([], Location(), MissingNode(), nil, Location(), "")]
+          [ModuleNode([], Location(), MissingNode(), nil, Location(), "", :"")]
         ),
         Location(),
-        "Parent"
+        "Parent",
+        :Parent
       )
 
       assert_errors expected, "module Parent module end", [
@@ -393,7 +394,7 @@ module YARP
         Location(),
         nil,
         nil,
-        StatementsNode([ModuleNode([], Location(), ConstantReadNode(), nil, Location(), "A")]),
+        StatementsNode([ModuleNode([], Location(), ConstantReadNode(:A), nil, Location(), "A", :A)]),
         [],
         Location(),
         nil,
@@ -424,7 +425,7 @@ module YARP
             BlockNode(
               [],
               nil,
-              StatementsNode([ModuleNode([], Location(), ConstantReadNode(), nil, Location(), "Foo")]),
+              StatementsNode([ModuleNode([], Location(), ConstantReadNode(:Foo), nil, Location(), "Foo", :Foo)]),
               Location(),
               Location()
             ),
@@ -459,12 +460,13 @@ module YARP
           [ClassNode(
             [],
             Location(),
-            ConstantReadNode(),
+            ConstantReadNode(:A),
             nil,
             nil,
             nil,
             Location(),
-            "A"
+            "A",
+            :A
           )]
         ),
         [],
@@ -603,12 +605,17 @@ module YARP
       ]
     end
 
+    def test_invalid_hex_escape
+      assert_errors expression('"\\xx"'), '"\\xx"', [
+        ["Invalid hex escape.", 1..3],
+      ]
+    end
+
     def test_do_not_allow_more_than_6_hexadecimal_digits_in_u_Unicode_character_notation
       expected = StringNode(Location(), Location(), Location(), "\u0001")
 
       assert_errors expected, '"\u{0000001}"', [
         ["invalid Unicode escape.", 4..11],
-        ["invalid Unicode escape.", 4..11]
       ]
     end
 
@@ -617,13 +624,11 @@ module YARP
 
       assert_errors expected, '"\u{000z}"', [
         ["unterminated Unicode escape", 7..7],
-        ["unterminated Unicode escape", 7..7]
       ]
     end
 
     def test_unterminated_unicode_brackets_should_be_a_syntax_error
       assert_errors expression('?\\u{3'), '?\\u{3', [
-        ["invalid Unicode escape.", 1..5],
         ["invalid Unicode escape.", 1..5],
       ]
     end
@@ -971,12 +976,13 @@ module YARP
       expected = ClassNode(
         [],
         Location(),
-        ConstantReadNode(),
+        ConstantReadNode(:A),
         nil,
         nil,
         StatementsNode([ReturnNode(Location(), nil)]),
         Location(),
-        "A"
+        "A",
+        :A
       )
 
       assert_errors expected, "class A; return; end", [
@@ -988,10 +994,11 @@ module YARP
       expected = ModuleNode(
         [],
         Location(),
-        ConstantReadNode(),
+        ConstantReadNode(:A),
         StatementsNode([ReturnNode(Location(), nil)]),
         Location(),
-        "A"
+        "A",
+        :A
       )
 
       assert_errors expected, "module A; return; end", [
@@ -1003,8 +1010,8 @@ module YARP
       expected = BeginNode(
         Location(),
         StatementsNode([
-          GlobalVariableWriteNode(Location(), NilNode(), Location()),
-          GlobalVariableWriteNode(Location(), NilNode(), Location())
+          GlobalVariableWriteNode(:$+, Location(), NilNode(), Location()),
+          GlobalVariableWriteNode(:$1466, Location(), NilNode(), Location())
         ]),
         nil,
         nil,

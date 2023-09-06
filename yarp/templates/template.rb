@@ -73,17 +73,6 @@ module YARP
     end
   end
 
-  # This represents a field on a node that is a list of locations.
-  class LocationListField < Field
-    def rbs_class
-      "Array[Location]"
-    end
-
-    def java_type
-      "Location[]"
-    end
-  end
-
   # This represents a field on a node that is the ID of a string interned
   # through the parser's constant pool.
   class ConstantField < Field
@@ -179,7 +168,7 @@ module YARP
       @name = config.fetch("name")
 
       type = @name.gsub(/(?<=.)[A-Z]/, "_\\0")
-      @type = "YP_NODE_#{type.upcase}"
+      @type = "YP_#{type.upcase}"
       @human = type.downcase
 
       @fields =
@@ -205,7 +194,6 @@ module YARP
       when "node?"      then OptionalNodeField
       when "node[]"     then NodeListField
       when "string"     then StringField
-      when "location[]" then LocationListField
       when "constant"   then ConstantField
       when "constant[]" then ConstantListField
       when "location"   then LocationField
@@ -264,14 +252,8 @@ module YARP
     def template(name, write_to: nil)
       filepath = "templates/#{name}.erb"
       template = File.expand_path("../#{filepath}", __dir__)
-      write_to ||= File.expand_path("../#{name}", __dir__)
 
-      if ERB.instance_method(:initialize).parameters.assoc(:key) # Ruby 2.6+
-        erb = ERB.new(File.read(template), trim_mode: "-")
-      else
-        erb = ERB.new(File.read(template), nil, "-")
-      end
-      erb.filename = template
+      erb = read_template(template)
 
       non_ruby_heading = <<~HEADING
       /******************************************************************************/
@@ -299,12 +281,31 @@ module YARP
           non_ruby_heading
         end
 
+      write_to ||= File.expand_path("../#{name}", __dir__)
       contents = heading + erb.result_with_hash(locals)
+
       FileUtils.mkdir_p(File.dirname(write_to))
       File.write(write_to, contents)
     end
 
     private
+
+    def read_template(filepath)
+      template = File.read(filepath, encoding: Encoding::UTF_8)
+      erb = erb(template)
+      erb.filename = filepath
+      erb
+    end
+
+    if ERB.instance_method(:initialize).parameters.assoc(:key) # Ruby 2.6+
+      def erb(template)
+        ERB.new(template, trim_mode: "-")
+      end
+    else
+      def erb(template)
+        ERB.new(template, nil, "-")
+      end
+    end
 
     def locals
       @locals ||=
@@ -339,7 +340,7 @@ end
 if __FILE__ == $0
   if ARGV.empty?
     YARP::TEMPLATES.each { |filepath| YARP.template(filepath) }
-  else
+  else # ruby/ruby
     name, write_to = ARGV
     YARP.template(name, write_to: write_to)
   end
