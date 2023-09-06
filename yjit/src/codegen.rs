@@ -5451,36 +5451,34 @@ fn gen_send_cfunc(
         iseq: None,
     });
 
-    if !kw_arg.is_null() {
-        // Build a hash from all kwargs passed
-        asm.comment("build_kwhash");
-        let imemo_ci = VALUE(ci as usize);
-        assert_ne!(0, unsafe { rb_IMEMO_TYPE_P(imemo_ci, imemo_callinfo) },
-            "we assume all callinfos with kwargs are on the GC heap");
-        let sp = asm.lea(asm.ctx.sp_opnd(0));
-        let kwargs = asm.ccall(build_kwhash as *const u8, vec![imemo_ci.into(), sp]);
-
-        // Replace the stack location at the start of kwargs with the new hash
-        let stack_opnd = asm.stack_opnd(argc - passed_argc);
-        asm.mov(stack_opnd, kwargs);
-    }
-
-    // Copy SP because REG_SP will get overwritten
-    let sp = asm.lea(asm.ctx.sp_opnd(0));
-
     // Pop the C function arguments from the stack (in the caller)
+    asm.spill_temps();
     asm.stack_pop((argc + 1).try_into().unwrap());
 
     // Progress bump in the _caller_. Even though we've pushed
     // a cfunc control frame, the CFP register points to the caller.
     jit_bump_progress(jit, asm);
 
+    if !kw_arg.is_null() {
+        // Build a hash from all kwargs passed
+        asm.comment("build_kwhash");
+        let imemo_ci = VALUE(ci as usize);
+        assert_ne!(0, unsafe { rb_IMEMO_TYPE_P(imemo_ci, imemo_callinfo) },
+            "we assume all callinfos with kwargs are on the GC heap");
+        let sp = asm.lea(asm.ctx.sp_opnd(SIZEOF_VALUE as isize * (argc + 1) as isize));
+        let kwargs = asm.ccall(build_kwhash as *const u8, vec![imemo_ci.into(), sp]);
+
+        // Replace the stack location at the start of kwargs with the new hash
+        let stack_opnd = asm.stack_opnd(-1 - passed_argc);
+        asm.mov(stack_opnd, kwargs);
+    }
+
     // Non-variadic method
     let args = if cfunc_argc >= 0 {
         // Copy the arguments from the stack to the C argument registers
         // self is the 0th argument and is at index argc from the stack top
         (0..=passed_argc).map(|i|
-            Opnd::mem(64, sp, -(argc + 1 - i) * SIZEOF_VALUE_I32)
+            asm.stack_opnd(-1 - i)
         ).collect()
     }
     // Variadic method
@@ -5489,8 +5487,8 @@ fn gen_send_cfunc(
         // rb_f_puts(int argc, VALUE *argv, VALUE recv)
         vec![
             Opnd::Imm(passed_argc.into()),
-            asm.lea(Opnd::mem(64, sp, -(argc) * SIZEOF_VALUE_I32)),
-            Opnd::mem(64, sp, -(argc + 1) * SIZEOF_VALUE_I32),
+            asm.lea(asm.ctx.sp_opnd(SIZEOF_VALUE as isize)),
+            asm.stack_opnd(-1),
         ]
     }
     else {
