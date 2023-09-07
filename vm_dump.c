@@ -1049,7 +1049,8 @@ rb_vm_bugreport(const void *ctx)
     {
         static bool crashing = false;
         if (crashing) {
-            fprintf(stderr, "Crashed while printing bug report\n");
+            fprintf(stderr, "Crashed while printing bug report. C backtrace follows\n");
+            rb_print_backtrace();
             return;
         }
         crashing = true;
