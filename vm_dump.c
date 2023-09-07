@@ -108,7 +108,7 @@ control_frame_dump(const rb_execution_context_t *ec, const rb_control_frame_t *c
         selfstr = "";
     }
 
-    if (cfp->iseq != 0) {
+    if (cfp->iseq != 0 && false) {
 #define RUBY_VM_IFUNC_P(ptr) IMEMO_TYPE_P(ptr, imemo_ifunc)
         if (RUBY_VM_IFUNC_P(cfp->iseq)) {
             iseq_name = "<ifunc>";
@@ -166,7 +166,7 @@ control_frame_dump(const rb_execution_context_t *ec, const rb_control_frame_t *c
     fprintf(stderr, "\n");
 
     // additional information for CI machines
-    if (ruby_on_ci) {
+    if (ruby_on_ci && false) {
         char buff[0x100];
 
         if (me) {
