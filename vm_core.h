@@ -1353,6 +1353,7 @@ VM_FRAME_CFRAME_P(const rb_control_frame_t *cfp)
 {
     int cframe_p = VM_ENV_FLAGS(cfp->ep, VM_FRAME_FLAG_CFRAME) != 0;
 
+#if 0
     // might be unreachable for now
     if (!(RUBY_VM_NORMAL_ISEQ_P(cfp->iseq) != cframe_p ||
               (VM_FRAME_TYPE(cfp) & VM_FRAME_MAGIC_MASK) == VM_FRAME_MAGIC_DUMMY)) {
@@ -1361,6 +1362,7 @@ VM_FRAME_CFRAME_P(const rb_control_frame_t *cfp)
                     RUBY_VM_NORMAL_ISEQ_P(cfp->iseq) != cframe_p,
                     (VM_FRAME_TYPE(cfp) & VM_FRAME_MAGIC_MASK) == VM_FRAME_MAGIC_DUMMY);
     }
+#endif
     VM_ASSERT(RUBY_VM_NORMAL_ISEQ_P(cfp->iseq) != cframe_p ||
               (VM_FRAME_TYPE(cfp) & VM_FRAME_MAGIC_MASK) == VM_FRAME_MAGIC_DUMMY);
     return cframe_p;
