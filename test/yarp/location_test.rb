@@ -537,6 +537,11 @@ module YARP
       assert_location(ModuleNode, "module Foo end")
     end
 
+    def test_MultiTargetNode
+      assert_location(MultiTargetNode, "for foo, bar in baz do end", 4...12, &:index)
+      assert_location(MultiTargetNode, "foo, (bar, baz) = qux", 5...15) { |node| node.targets.last }
+    end
+
     def test_MultiWriteNode
       assert_location(MultiWriteNode, "foo, bar = baz")
     end
@@ -816,6 +821,14 @@ module YARP
 
       node = result.value.statements.body.last
       node = yield node if block_given?
+
+      if expected.begin == 0
+        assert_equal 0, node.location.start_column
+      end
+
+      if expected.end == source.length
+        assert_equal source.split("\n").last.length, node.location.end_column
+      end
 
       assert_kind_of kind, node
       assert_equal expected.begin, node.location.start_offset

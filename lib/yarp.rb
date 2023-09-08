@@ -95,7 +95,7 @@ module YARP
     # The column number in bytes where this location ends from the start of the
     # line.
     def end_column
-      source.column(end_offset - 1)
+      source.column(end_offset)
     end
 
     def deconstruct_keys(keys)
@@ -540,10 +540,10 @@ module YARP
             sorted = [
               *params.requireds.grep(RequiredParameterNode).map(&:name),
               *params.optionals.map(&:name),
-              *((params.rest.name ? params.rest.name.to_sym : :*) if params.rest && params.rest.operator != ","),
+              *((params.rest.name || :*) if params.rest && params.rest.operator != ","),
               *params.posts.grep(RequiredParameterNode).map(&:name),
-              *params.keywords.reject(&:value).map { |param| param.name.chomp(":").to_sym },
-              *params.keywords.select(&:value).map { |param| param.name.chomp(":").to_sym }
+              *params.keywords.reject(&:value).map(&:name),
+              *params.keywords.select(&:value).map(&:name)
             ]
 
             # TODO: When we get a ... parameter, we should be pushing * and &

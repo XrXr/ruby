@@ -747,7 +747,7 @@ typedef struct rb_objspace {
         unsigned int during_compacting : 1;
         unsigned int during_reference_updating : 1;
         unsigned int gc_stressful: 1;
-        unsigned int has_hook: 1;
+        unsigned int has_newobj_hook: 1;
         unsigned int during_minor_gc : 1;
         unsigned int during_incremental_marking : 1;
         unsigned int measure_gc : 1;
@@ -2466,7 +2466,7 @@ rb_objspace_set_event_hook(const rb_event_flag_t event)
 {
     rb_objspace_t *objspace = &rb_objspace;
     objspace->hook_events = event & RUBY_INTERNAL_EVENT_OBJSPACE_MASK;
-    objspace->flags.has_hook = (objspace->hook_events != 0);
+    objspace->flags.has_newobj_hook = !!(objspace->hook_events & RUBY_INTERNAL_EVENT_NEWOBJ);
 }
 
 static void
@@ -2476,7 +2476,7 @@ gc_event_hook_body(rb_execution_context_t *ec, rb_objspace_t *objspace, const rb
     EXEC_EVENT_HOOK(ec, event, ec->cfp->self, 0, 0, 0, data);
 }
 
-#define gc_event_hook_available_p(objspace) ((objspace)->flags.has_hook)
+#define gc_event_newobj_hook_needed_p(objspace) ((objspace)->flags.has_newobj_hook)
 #define gc_event_hook_needed_p(objspace, event) ((objspace)->hook_events & (event))
 
 #define gc_event_hook_prep(objspace, event, data, prep) do { \
@@ -2836,7 +2836,7 @@ newobj_of0(VALUE klass, VALUE flags, int wb_protected, rb_ractor_t *cr, size_t a
 
     if (!UNLIKELY(during_gc ||
                   ruby_gc_stressful ||
-                  gc_event_hook_available_p(objspace)) &&
+                  gc_event_newobj_hook_needed_p(objspace)) &&
             wb_protected) {
         obj = newobj_alloc(objspace, cr, size_pool_idx, false);
         newobj_init(klass, flags, wb_protected, objspace, obj);
@@ -9799,15 +9799,6 @@ gc_is_moveable_obj(rb_objspace_t *objspace, VALUE obj)
     return FALSE;
 }
 
-/* Used in places that could malloc, which can cause the GC to run. We need to
- * temporarily disable the GC to allow the malloc to happen. */
-#define COULD_MALLOC_REGION_START() \
-    GC_ASSERT(during_gc); \
-    VALUE _already_disabled = rb_gc_disable_no_rest(); \
-
-#define COULD_MALLOC_REGION_END() \
-    if (_already_disabled == Qfalse) rb_objspace_gc_enable(objspace);
-
 static VALUE
 gc_move(rb_objspace_t *objspace, VALUE scan, VALUE free, size_t src_slot_size, size_t slot_size)
 {
@@ -9840,11 +9831,11 @@ gc_move(rb_objspace_t *objspace, VALUE scan, VALUE free, size_t src_slot_size, s
 
     if (FL_TEST((VALUE)src, FL_EXIVAR)) {
         /* Resizing the st table could cause a malloc */
-        COULD_MALLOC_REGION_START();
+        DURING_GC_COULD_MALLOC_REGION_START();
         {
             rb_mv_generic_ivar((VALUE)src, (VALUE)dest);
         }
-        COULD_MALLOC_REGION_END();
+        DURING_GC_COULD_MALLOC_REGION_END();
     }
 
     st_data_t srcid = (st_data_t)src, id;
@@ -9854,12 +9845,12 @@ gc_move(rb_objspace_t *objspace, VALUE scan, VALUE free, size_t src_slot_size, s
     if (st_lookup(objspace->obj_to_id_tbl, srcid, &id)) {
         gc_report(4, objspace, "Moving object with seen id: %p -> %p\n", (void *)src, (void *)dest);
         /* Resizing the st table could cause a malloc */
-        COULD_MALLOC_REGION_START();
+        DURING_GC_COULD_MALLOC_REGION_START();
         {
             st_delete(objspace->obj_to_id_tbl, &srcid, 0);
             st_insert(objspace->obj_to_id_tbl, (st_data_t)dest, id);
         }
-        COULD_MALLOC_REGION_END();
+        DURING_GC_COULD_MALLOC_REGION_END();
     }
 
     /* Move the object */
