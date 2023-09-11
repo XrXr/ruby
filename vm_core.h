@@ -814,12 +814,12 @@ struct rb_block {
 
 #define ASSERT_FRAME_MATERIALIZED(cfp) RUBY_ASSERT(! (cfp)->jit_frame)
 
-#define CFP_PC(cfp) (cfp->jit_frame ? cfp->jit_frame->pc : cfp->_pc)
+#define CFP_PC(cfp) ((cfp)->jit_frame ? (cfp)->jit_frame->pc : (cfp)->_pc)
 
 // FIXME: this is recursive and can blow the machine stack
-#define CFP_SP(cfp) (cfp->jit_frame ? (rb_vm_base_ptr(cfp) + cfp->jit_frame->sp_offset) : cfp->_sp)
+#define CFP_SP(cfp) ((cfp)->jit_frame ? (rb_vm_base_ptr(cfp) + (cfp)->jit_frame->sp_offset) : (cfp)->_sp)
 
-#define CFP_ISEQ(cfp) ((cfp->jit_frame && ((cfp->jit_frame->flags & VM_FRAME_MAGIC_MASK) == VM_FRAME_FLAG_CFRAME)) ? 0 : cfp->_iseq)
+#define CFP_ISEQ(cfp) (((cfp)->jit_frame && (((cfp)->jit_frame->flags & VM_FRAME_MAGIC_MASK) == VM_FRAME_FLAG_CFRAME)) ? 0 : (cfp)->_iseq)
 
 typedef struct rb_jit_frame {
     VALUE *pc;
