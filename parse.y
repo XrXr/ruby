@@ -875,10 +875,10 @@ static NODE* node_newnode_with_locals(struct parser_params *, enum node_type, VA
 static NODE* node_newnode(struct parser_params *, enum node_type, VALUE, VALUE, VALUE, const rb_code_location_t*);
 #define rb_node_newnode(type, a1, a2, a3, loc) node_newnode(p, (type), (a1), (a2), (a3), (loc))
 
-/* Make a new temporal node, which should not be appeared in the
+/* Make a new internal node, which should not be appeared in the
  * result AST and does not have node_id and location. */
-static NODE* node_new_temporal(struct parser_params *p, enum node_type type, VALUE a0, VALUE a1, VALUE a2);
-#define NODE_NEW_TEMPORAL(t,a0,a1,a2) node_new_temporal(p, (t),(VALUE)(a0),(VALUE)(a1),(VALUE)(a2))
+static NODE* node_new_internal(struct parser_params *p, enum node_type type, VALUE a0, VALUE a1, VALUE a2);
+#define NODE_NEW_INTERNAL(t,a0,a1,a2) node_new_internal(p, (t),(VALUE)(a0),(VALUE)(a1),(VALUE)(a2))
 
 static NODE *nd_set_loc(NODE *nd, const YYLTYPE *loc);
 
@@ -1617,7 +1617,7 @@ static int looking_at_eol_p(struct parser_params *p);
 %type <id>   f_kwrest f_label f_arg_asgn call_op call_op2 reswords relop dot_or_colon
 %type <id>   p_kwrest p_kwnorest p_any_kwrest p_kw_label
 %type <id>   f_no_kwarg f_any_kwrest args_forward excessed_comma nonlocal_var
- %type <ctxt> lex_ctxt /* keep <ctxt> in ripper */
+ %type <ctxt> lex_ctxt k_class k_module /* keep <ctxt> in ripper */
 %token END_OF_INPUT 0	"end-of-input"
 %token <id> '.'
 /* escaped chars, should be ignored otherwise */
@@ -2177,7 +2177,7 @@ def_name	: fname
                         YYSTYPE c = {.ctxt = p->ctxt};
                         numparam_name(p, fname);
                         NODE *save =
-                            NODE_NEW_TEMPORAL(NODE_SELF,
+                            NODE_NEW_INTERNAL(NODE_SELF,
                                               /*head*/numparam_push(p),
                                               /*nth*/p->max_numparam,
                                               /*cval*/c.val);
@@ -3609,8 +3609,8 @@ primary		: literal
                     /*% %*/
                     /*% ripper: class!($2, $3, $5) %*/
                         local_pop(p);
-                        p->ctxt.in_class = $<ctxt>1.in_class;
-                        p->ctxt.shareable_constant_value = $<ctxt>1.shareable_constant_value;
+                        p->ctxt.in_class = $1.in_class;
+                        p->ctxt.shareable_constant_value = $1.shareable_constant_value;
                     }
                 | k_class tLSHFT expr
                     {
@@ -3630,9 +3630,9 @@ primary		: literal
                     /*% %*/
                     /*% ripper: sclass!($3, $6) %*/
                         local_pop(p);
-                        p->ctxt.in_def = $<ctxt>1.in_def;
-                        p->ctxt.in_class = $<ctxt>1.in_class;
-                        p->ctxt.shareable_constant_value = $<ctxt>1.shareable_constant_value;
+                        p->ctxt.in_def = $1.in_def;
+                        p->ctxt.in_class = $1.in_class;
+                        p->ctxt.shareable_constant_value = $1.shareable_constant_value;
                     }
                 | k_module cpath
                     {
@@ -3654,8 +3654,8 @@ primary		: literal
                     /*% %*/
                     /*% ripper: module!($2, $4) %*/
                         local_pop(p);
-                        p->ctxt.in_class = $<ctxt>1.in_class;
-                        p->ctxt.shareable_constant_value = $<ctxt>1.shareable_constant_value;
+                        p->ctxt.in_class = $1.in_class;
+                        p->ctxt.shareable_constant_value = $1.shareable_constant_value;
                     }
                 | defn_head
                   f_arglist
@@ -3807,7 +3807,7 @@ k_for		: keyword_for
 k_class		: keyword_class
                     {
                         token_info_push(p, "class", &@$);
-                        $<ctxt>$ = p->ctxt;
+                        $$ = p->ctxt;
                     /*%%%*/
                         push_end_expect_token_locations(p, &@1.beg_pos);
                     /*% %*/
@@ -3817,7 +3817,7 @@ k_class		: keyword_class
 k_module	: keyword_module
                     {
                         token_info_push(p, "module", &@$);
-                        $<ctxt>$ = p->ctxt;
+                        $$ = p->ctxt;
                     /*%%%*/
                         push_end_expect_token_locations(p, &@1.beg_pos);
                     /*% %*/
@@ -10578,7 +10578,7 @@ yylex(YYSTYPE *lval, YYLTYPE *yylloc, struct parser_params *p)
 #define LVAR_USED ((ID)1 << (sizeof(ID) * CHAR_BIT - 1))
 
 static NODE*
-node_new_temporal(struct parser_params *p, enum node_type type, VALUE a0, VALUE a1, VALUE a2)
+node_new_internal(struct parser_params *p, enum node_type type, VALUE a0, VALUE a1, VALUE a2)
 {
     NODE *n = rb_ast_newnode(p->ast, type);
 
@@ -10589,7 +10589,7 @@ node_new_temporal(struct parser_params *p, enum node_type type, VALUE a0, VALUE 
 static NODE*
 node_newnode(struct parser_params *p, enum node_type type, VALUE a0, VALUE a1, VALUE a2, const rb_code_location_t *loc)
 {
-    NODE *n = node_new_temporal(p, type, a0, a1, a2);
+    NODE *n = node_new_internal(p, type, a0, a1, a2);
 
     nd_set_loc(n, loc);
     nd_set_node_id(n, parser_get_node_id(p));
@@ -12162,6 +12162,7 @@ value_expr_gen(struct parser_params *p, NODE *node)
     }
     return TRUE;
 }
+
 static void
 void_expr(struct parser_params *p, NODE *node)
 {
