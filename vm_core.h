@@ -819,15 +819,18 @@ struct rb_block {
 // FIXME: this is recursive and can blow the machine stack
 #define CFP_SP(cfp) (cfp->jit_frame ? (rb_vm_base_ptr(cfp) + cfp->jit_frame->sp_offset) : cfp->_sp)
 
+#define CFP_ISEQ(cfp) ((cfp->jit_frame && ((cfp->jit_frame->flags & VM_FRAME_MAGIC_MASK) == VM_FRAME_FLAG_CFRAME)) ? 0 : cfp->_iseq)
+
 typedef struct rb_jit_frame {
     VALUE *pc;
     int32_t sp_offset;
+    VALUE flags;
 } rb_jit_frame_t;
 
 typedef struct rb_control_frame_struct {
     const VALUE *_pc;          // cfp[0]
     VALUE *_sp;                // cfp[1]
-    const rb_iseq_t *iseq;     // cfp[2]
+    const rb_iseq_t *_iseq;    // cfp[2]
     VALUE self;                // cfp[3] / block[0]
     const VALUE *ep;           // cfp[4] / block[1]
     const void *block_code;    // cfp[5] / block[2] -- iseq, ifunc, or forwarded block handler
@@ -1355,15 +1358,15 @@ VM_FRAME_CFRAME_P(const rb_control_frame_t *cfp)
 
 #if 0
     // might be unreachable for now
-    if (!(RUBY_VM_NORMAL_ISEQ_P(cfp->iseq) != cframe_p ||
+    if (!(RUBY_VM_NORMAL_ISEQ_P(CFP_ISEQ(cfp)) != cframe_p ||
               (VM_FRAME_TYPE(cfp) & VM_FRAME_MAGIC_MASK) == VM_FRAME_MAGIC_DUMMY)) {
 
         fprintf(stderr, "first_part=%d, second_part=%d\n",
-                    RUBY_VM_NORMAL_ISEQ_P(cfp->iseq) != cframe_p,
+                    RUBY_VM_NORMAL_ISEQ_P(CFP_ISEQ(cfp)) != cframe_p,
                     (VM_FRAME_TYPE(cfp) & VM_FRAME_MAGIC_MASK) == VM_FRAME_MAGIC_DUMMY);
     }
 #endif
-    VM_ASSERT(RUBY_VM_NORMAL_ISEQ_P(cfp->iseq) != cframe_p ||
+    VM_ASSERT(RUBY_VM_NORMAL_ISEQ_P(CFP_ISEQ(cfp)) != cframe_p ||
               (VM_FRAME_TYPE(cfp) & VM_FRAME_MAGIC_MASK) == VM_FRAME_MAGIC_DUMMY);
     return cframe_p;
 }

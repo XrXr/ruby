@@ -108,20 +108,20 @@ control_frame_dump(const rb_execution_context_t *ec, const rb_control_frame_t *c
         selfstr = "";
     }
 
-    if (cfp->iseq != 0 && false) {
+    if (CFP_ISEQ(cfp) != 0 && false) {
 #define RUBY_VM_IFUNC_P(ptr) IMEMO_TYPE_P(ptr, imemo_ifunc)
-        if (RUBY_VM_IFUNC_P(cfp->iseq)) {
+        if (RUBY_VM_IFUNC_P(CFP_ISEQ(cfp))) {
             iseq_name = "<ifunc>";
         }
-        else if (SYMBOL_P((VALUE)cfp->iseq)) {
-            tmp = rb_sym2str((VALUE)cfp->iseq);
+        else if (SYMBOL_P((VALUE)CFP_ISEQ(cfp))) {
+            tmp = rb_sym2str((VALUE)CFP_ISEQ(cfp));
             iseq_name = RSTRING_PTR(tmp);
             snprintf(posbuf, MAX_POSBUF, ":%s", iseq_name);
             line = -1;
         }
         else {
             if (CFP_PC(cfp)) {
-                iseq = cfp->iseq;
+                iseq = CFP_ISEQ(cfp);
                 pc = CFP_PC(cfp) - ISEQ_BODY(iseq)->iseq_encoded;
                 iseq_name = RSTRING_PTR(ISEQ_BODY(iseq)->location.label);
                 line = rb_vm_get_sourceline(cfp);
@@ -189,7 +189,7 @@ control_frame_dump(const rb_execution_context_t *ec, const rb_control_frame_t *c
             if (ISEQ_BODY(iseq)->local_table_size > 0) {
                 fprintf(stderr, "  lvars:\n");
                 for (unsigned int i=0; i<ISEQ_BODY(iseq)->local_table_size; i++) {
-                    const VALUE *argv = cfp->ep - ISEQ_BODY(cfp->iseq)->local_table_size - VM_ENV_DATA_SIZE + 1;
+                    const VALUE *argv = cfp->ep - ISEQ_BODY(CFP_ISEQ(cfp))->local_table_size - VM_ENV_DATA_SIZE + 1;
                     fprintf(stderr, "    %s: %s\n",
                             rb_id2name(ISEQ_BODY(iseq)->local_table[i]),
                             rb_raw_obj_info(buff, 0x100, argv[i]));
@@ -286,9 +286,9 @@ static const VALUE *
 vm_base_ptr(const rb_control_frame_t *cfp)
 {
     const rb_control_frame_t *prev_cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
-    const VALUE *bp = prev_cfp->sp + ISEQ_BODY(cfp->iseq)->local_table_size + VM_ENV_DATA_SIZE;
+    const VALUE *bp = prev_cfp->sp + ISEQ_BODY(CFP_ISEQ(cfp))->local_table_size + VM_ENV_DATA_SIZE;
 
-    if (ISEQ_BODY(cfp->iseq)->type == ISEQ_TYPE_METHOD || VM_FRAME_BMETHOD_P(cfp)) {
+    if (ISEQ_BODY(CFP_ISEQ(cfp))->type == ISEQ_TYPE_METHOD || VM_FRAME_BMETHOD_P(cfp)) {
         bp += 1;
     }
     return bp;
@@ -303,7 +303,7 @@ vm_stack_dump_each(const rb_execution_context_t *ec, const rb_control_frame_t *c
     const VALUE *ep = cfp->ep;
 
     if (VM_FRAME_RUBYFRAME_P(cfp)) {
-        const rb_iseq_t *iseq = cfp->iseq;
+        const rb_iseq_t *iseq = CFP_ISEQ(cfp);
         argc = ISEQ_BODY(iseq)->param.lead_num;
         local_table_size = ISEQ_BODY(iseq)->local_table_size;
     }
@@ -374,7 +374,7 @@ rb_vmdebug_debug_print_register(const rb_execution_context_t *ec)
     ptrdiff_t cfpi;
 
     if (VM_FRAME_RUBYFRAME_P(cfp)) {
-        pc = CFP_PC(cfp) - ISEQ_BODY(cfp->iseq)->iseq_encoded;
+        pc = CFP_PC(cfp) - ISEQ_BODY(CFP_ISEQ(cfp))->iseq_encoded;
     }
 
     if (ep < 0 || (size_t)ep > ec->vm_stack_size) {
@@ -395,7 +395,7 @@ rb_vmdebug_thread_dump_regs(VALUE thval)
 void
 rb_vmdebug_debug_print_pre(const rb_execution_context_t *ec, const rb_control_frame_t *cfp, const VALUE *_pc)
 {
-    const rb_iseq_t *iseq = cfp->iseq;
+    const rb_iseq_t *iseq = CFP_ISEQ(cfp);
 
     if (iseq != 0) {
         ptrdiff_t pc = _pc - ISEQ_BODY(iseq)->iseq_encoded;
