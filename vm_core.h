@@ -1339,6 +1339,7 @@ rb_vm_cfp_materialize(rb_control_frame_t *cfp)
     if (cfp->jit_frame) {
         cfp->_pc = CFP_PC(cfp);
         cfp->_sp = CFP_SP(cfp);
+        if (cfp->jit_frame->flags & VM_FRAME_FLAG_CFRAME) cfp->_iseq = 0;
         cfp->jit_frame = NULL;
     }
 }
@@ -1363,9 +1364,11 @@ VM_FRAME_CFRAME_P(const rb_control_frame_t *cfp)
     if (!(RUBY_VM_NORMAL_ISEQ_P(CFP_ISEQ(cfp)) != cframe_p ||
               (VM_FRAME_TYPE(cfp) & VM_FRAME_MAGIC_MASK) == VM_FRAME_MAGIC_DUMMY)) {
 
-        fprintf(stderr, "first_part=%d, second_part=%d\n",
+        fprintf(stderr, "first_part=%d, second_part=%d cframe_p=%d CFP_ISEQ=%p\n",
                     RUBY_VM_NORMAL_ISEQ_P(CFP_ISEQ(cfp)) != cframe_p,
-                    (VM_FRAME_TYPE(cfp) & VM_FRAME_MAGIC_MASK) == VM_FRAME_MAGIC_DUMMY);
+                    (VM_FRAME_TYPE(cfp) & VM_FRAME_MAGIC_MASK) == VM_FRAME_MAGIC_DUMMY,
+                    cframe_p,
+                    CFP_ISEQ(cfp));
     }
 #endif
     VM_ASSERT(RUBY_VM_NORMAL_ISEQ_P(CFP_ISEQ(cfp)) != cframe_p ||
