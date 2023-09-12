@@ -4,8 +4,12 @@ require_relative "test_helper"
 
 module YARP
   class LocationTest < TestCase
-    def test_AliasNode
-      assert_location(AliasNode, "alias foo bar")
+    def test_AliasGlobalVariableNode
+      assert_location(AliasGlobalVariableNode, "alias $foo $bar")
+    end
+
+    def test_AliasMethodNode
+      assert_location(AliasMethodNode, "alias foo bar")
     end
 
     def test_AlternationPatternNode
@@ -450,13 +454,17 @@ module YARP
       assert_location(IntegerNode, "0o1_000")
     end
 
+    def test_InterpolatedMatchLastLineNode
+      assert_location(InterpolatedMatchLastLineNode, "if /foo \#{bar}/ then end", 3...15, &:predicate)
+    end
+
     def test_InterpolatedRegularExpressionNode
       assert_location(InterpolatedRegularExpressionNode, "/\#{foo}/")
     end
 
     def test_InterpolatedStringNode
       assert_location(InterpolatedStringNode, "\"foo \#@bar baz\"")
-      assert_location(InterpolatedStringNode, "<<~A\nhello world\nA", 0...4)
+      assert_location(InterpolatedStringNode, "<<~A\nhello \#{1} world\nA", 0...4)
     end
 
     def test_InterpolatedSymbolNode
@@ -523,6 +531,10 @@ module YARP
 
     def test_LocalVariableWriteNode
       assert_location(LocalVariableWriteNode, "foo = bar")
+    end
+
+    def test_MatchLastLineNode
+      assert_location(MatchLastLineNode, "if /foo/ then end", 3...8, &:predicate)
     end
 
     def test_MatchPredicateNode
