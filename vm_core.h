@@ -1356,7 +1356,7 @@ VM_FRAME_CFRAME_P(const rb_control_frame_t *cfp)
 {
     int cframe_p = VM_ENV_FLAGS(cfp->ep, VM_FRAME_FLAG_CFRAME) != 0;
 
-#if 0
+#if VM_CHECK_MODE > 0
     // might be unreachable for now
     if (!(RUBY_VM_NORMAL_ISEQ_P(CFP_ISEQ(cfp)) != cframe_p ||
               (VM_FRAME_TYPE(cfp) & VM_FRAME_MAGIC_MASK) == VM_FRAME_MAGIC_DUMMY)) {
