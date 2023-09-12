@@ -705,10 +705,10 @@ pub struct rb_block__bindgen_ty_1 {
     pub bindgen_union_field: [u64; 3usize],
 }
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
 pub struct rb_jit_frame {
     pub pc: *mut VALUE,
     pub sp_offset: i32,
+    pub flags: VALUE,
 }
 pub type rb_jit_frame_t = rb_jit_frame;
 pub type rb_control_frame_t = rb_control_frame_struct;
