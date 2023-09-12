@@ -5251,16 +5251,21 @@ fn gen_push_frame(
         //asm.mov(cfp_opnd(RUBY_OFFSET_CFP_PC), 0.into());
         //asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
     };
-    asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
     asm.mov(cfp_opnd(RUBY_OFFSET_CFP_SP), sp);
-    let iseq: Opnd = if let Some(iseq) = frame.iseq {
-        VALUE::from(iseq).into()
-    } else {
-        0.into()
-    };
-    asm.mov(cfp_opnd(RUBY_OFFSET_CFP_ISEQ), iseq);
+    if let Some(iseq) = frame.iseq {
+        asm.mov(cfp_opnd(RUBY_OFFSET_CFP_ISEQ), VALUE::from(iseq).into());
+    }
     asm.mov(cfp_opnd(RUBY_OFFSET_CFP_SELF), frame.recv);
     asm.mov(cfp_opnd(RUBY_OFFSET_CFP_BLOCK_CODE), 0.into());
+
+    // Set cfp->jit_frame for C frames
+    if frame.iseq.is_none() {
+        let cframe_jit_frame = unsafe { rb_yjit_frame_new(ptr::null_mut(), 0) };
+        unsafe { (*cframe_jit_frame).flags = VALUE(frame.frame_type.as_usize()) };
+        asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), Opnd::const_ptr(cframe_jit_frame as _));
+    } else {
+        asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
+    }
 
     // Spill stack temps to let the callee use them (must be done before changing SP)
     asm.spill_temps();
