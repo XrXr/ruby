@@ -1170,12 +1170,9 @@ rb_yjit_set_exception_return(rb_control_frame_t *cfp, void *leave_exit, void *le
 }
 
 rb_jit_frame_t *
-rb_yjit_frame_new(VALUE *pc, int32_t sp_offset)
+rb_yjit_frame_new(void)
 {
-    rb_jit_frame_t *jit_frame = xmalloc(sizeof(rb_jit_frame_t));
-    jit_frame->pc = pc;
-    jit_frame->sp_offset = sp_offset;
-    return jit_frame;
+    return ALLOC(rb_jit_frame_t);
 }
 
 // Primitives used by yjit.rb
