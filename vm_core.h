@@ -1369,6 +1369,7 @@ VM_FRAME_CFRAME_P(const rb_control_frame_t *cfp)
                     (VM_FRAME_TYPE(cfp) & VM_FRAME_MAGIC_MASK) == VM_FRAME_MAGIC_DUMMY,
                     cframe_p,
                     CFP_ISEQ(cfp));
+        rp(CFP_ISEQ(cfp));
     }
 #endif
     VM_ASSERT(RUBY_VM_NORMAL_ISEQ_P(CFP_ISEQ(cfp)) != cframe_p ||
