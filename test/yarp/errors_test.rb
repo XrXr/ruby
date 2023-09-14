@@ -1137,9 +1137,22 @@ module YARP
       assert_errors expected, "def foo(a = 1,b,*c);end", [["Unexpected parameter `*`", 16..17]]
     end
 
+    def test_invalid_operator_write
+      source = "foo! += 1"
+      assert_errors expression(source), source, [
+        ["Unexpected write target", 0..4]
+      ]
+    end
+
     def test_unterminated_global_variable
       assert_errors expression("$"), "$", [
         ["Invalid global variable", 0..1]
+      ]
+    end
+
+    def test_invalid_global_variable_write
+      assert_errors expression("$',"), "$',", [
+        ["Immutable variable as a write target", 0..2]
       ]
     end
 

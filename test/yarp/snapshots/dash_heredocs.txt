@@ -28,7 +28,7 @@
         │   │           └── unescaped: "  b\n"
         │   ├── closing_loc: ∅
         │   ├── block: ∅
-        │   ├── flags: 
+        │   ├── flags: ∅
         │   └── name: "+"
         ├── @ InterpolatedXStringNode (location: (59...67))
         │   ├── opening_loc: (59...67) = "<<-`EOF`"
@@ -142,7 +142,7 @@
         │   └── unescaped: "  a\n  b\n"
         ├── @ StringNode (location: (201...206))
         │   ├── opening_loc: (201...206) = "<<-''"
-        │   ├── content_loc: (206...207) = "\n"
+        │   ├── content_loc: (207...207) = ""
         │   ├── closing_loc: (207...208) = "\n"
         │   └── unescaped: ""
         ├── @ StringNode (location: (209...217))
@@ -187,7 +187,7 @@
         │   │           └── closing_loc: (264...266) = "B\n"
         │   ├── closing_loc: ∅
         │   ├── block: ∅
-        │   ├── flags: 
+        │   ├── flags: ∅
         │   └── name: "+"
         └── @ CallNode (location: (267...278))
             ├── receiver:
@@ -226,5 +226,5 @@
             │           └── closing_loc: (299...301) = "B\n"
             ├── closing_loc: ∅
             ├── block: ∅
-            ├── flags: 
+            ├── flags: ∅
             └── name: "+"
