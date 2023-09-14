@@ -296,6 +296,16 @@ fn jit_prepare_routine_call(
     asm.ctx.clear_local_types();
 }
 
+impl rb_jit_frame_t {
+    fn move_to_heap(self) -> *const Self {
+        unsafe {
+            let frame = rb_yjit_frame_new();
+            frame.write(self);
+            frame
+        }
+    }
+}
+
 fn jit_bump_progress(jit: &mut JITState, asm: &mut Assembler) {
     asm.comment("progress point bump");
 
@@ -307,15 +317,11 @@ fn jit_bump_progress(jit: &mut JITState, asm: &mut Assembler) {
         pc.add(cur_insn_len.as_usize())
     };
 
-    let jit_frame = unsafe {
-        let frame = rb_yjit_frame_new();
-        frame.write(rb_jit_frame_t {
-            pc: next_pc,
-            sp_offset: asm.ctx.get_stack_size().into(),
-            flags: VALUE(0),
-        });
-        frame
-    };
+    let jit_frame = rb_jit_frame_t {
+        pc: next_pc,
+        sp_offset: asm.ctx.get_stack_size().into(),
+        flags: VALUE(0),
+    }.move_to_heap();
     asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), Opnd::const_ptr(jit_frame as _));
 }
 
@@ -5265,15 +5271,11 @@ fn gen_push_frame(
 
     // Set cfp->jit_frame for C frames
     if frame.iseq.is_none() {
-        let cframe_jit_frame = unsafe {
-            let jit_frame = rb_yjit_frame_new();
-            jit_frame.write(rb_jit_frame_t {
-                pc: ptr::null_mut(),
-                sp_offset: 0,
-                flags: VALUE(frame.frame_type.as_usize()),
-            });
-            jit_frame
-        };
+        let cframe_jit_frame = rb_jit_frame_t {
+            pc: ptr::null_mut(),
+            sp_offset: 0,
+            flags: VALUE(frame.frame_type.as_usize()),
+        }.move_to_heap();
         asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), Opnd::const_ptr(cframe_jit_frame as _));
     } else {
         asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
