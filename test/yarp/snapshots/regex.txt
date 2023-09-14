@@ -37,6 +37,7 @@
         │   ├── opening_loc: (28...29) = "/"
         │   ├── parts: (length: 2)
         │   │   ├── @ StringNode (location: (29...33))
+        │   │   │   ├── flags: ∅
         │   │   │   ├── opening_loc: ∅
         │   │   │   ├── content_loc: (29...33) = "aaa "
         │   │   │   ├── closing_loc: ∅
@@ -52,6 +53,7 @@
         │   ├── opening_loc: (41...42) = "/"
         │   ├── parts: (length: 3)
         │   │   ├── @ StringNode (location: (42...46))
+        │   │   │   ├── flags: ∅
         │   │   │   ├── opening_loc: ∅
         │   │   │   ├── content_loc: (42...46) = "aaa "
         │   │   │   ├── closing_loc: ∅
@@ -73,6 +75,7 @@
         │   │   │   │           └── name: "bbb"
         │   │   │   └── closing_loc: (51...52) = "}"
         │   │   └── @ StringNode (location: (52...56))
+        │   │       ├── flags: ∅
         │   │       ├── opening_loc: ∅
         │   │       ├── content_loc: (52...56) = " ccc"
         │   │       ├── closing_loc: ∅
@@ -81,34 +84,37 @@
         │   └── flags: ∅
         ├── @ ArrayNode (location: (59...86))
         │   ├── elements: (length: 2)
-        │   │   ├── @ CallNode (location: (60...80))
-        │   │   │   ├── receiver:
-        │   │   │   │   @ RegularExpressionNode (location: (60...73))
-        │   │   │   │   ├── opening_loc: (60...61) = "/"
-        │   │   │   │   ├── content_loc: (61...72) = "(?<foo>bar)"
-        │   │   │   │   ├── closing_loc: (72...73) = "/"
-        │   │   │   │   ├── unescaped: "(?<foo>bar)"
-        │   │   │   │   └── flags: ∅
-        │   │   │   ├── call_operator_loc: ∅
-        │   │   │   ├── message_loc: (74...76) = "=~"
-        │   │   │   ├── opening_loc: ∅
-        │   │   │   ├── arguments:
-        │   │   │   │   @ ArgumentsNode (location: (77...80))
-        │   │   │   │   └── arguments: (length: 1)
-        │   │   │   │       └── @ CallNode (location: (77...80))
-        │   │   │   │           ├── receiver: ∅
-        │   │   │   │           ├── call_operator_loc: ∅
-        │   │   │   │           ├── message_loc: (77...80) = "baz"
-        │   │   │   │           ├── opening_loc: ∅
-        │   │   │   │           ├── arguments: ∅
-        │   │   │   │           ├── closing_loc: ∅
-        │   │   │   │           ├── block: ∅
-        │   │   │   │           ├── flags: variable_call
-        │   │   │   │           └── name: "baz"
-        │   │   │   ├── closing_loc: ∅
-        │   │   │   ├── block: ∅
-        │   │   │   ├── flags: ∅
-        │   │   │   └── name: "=~"
+        │   │   ├── @ MatchWriteNode (location: (60...80))
+        │   │   │   ├── call:
+        │   │   │   │   @ CallNode (location: (60...80))
+        │   │   │   │   ├── receiver:
+        │   │   │   │   │   @ RegularExpressionNode (location: (60...73))
+        │   │   │   │   │   ├── opening_loc: (60...61) = "/"
+        │   │   │   │   │   ├── content_loc: (61...72) = "(?<foo>bar)"
+        │   │   │   │   │   ├── closing_loc: (72...73) = "/"
+        │   │   │   │   │   ├── unescaped: "(?<foo>bar)"
+        │   │   │   │   │   └── flags: ∅
+        │   │   │   │   ├── call_operator_loc: ∅
+        │   │   │   │   ├── message_loc: (74...76) = "=~"
+        │   │   │   │   ├── opening_loc: ∅
+        │   │   │   │   ├── arguments:
+        │   │   │   │   │   @ ArgumentsNode (location: (77...80))
+        │   │   │   │   │   └── arguments: (length: 1)
+        │   │   │   │   │       └── @ CallNode (location: (77...80))
+        │   │   │   │   │           ├── receiver: ∅
+        │   │   │   │   │           ├── call_operator_loc: ∅
+        │   │   │   │   │           ├── message_loc: (77...80) = "baz"
+        │   │   │   │   │           ├── opening_loc: ∅
+        │   │   │   │   │           ├── arguments: ∅
+        │   │   │   │   │           ├── closing_loc: ∅
+        │   │   │   │   │           ├── block: ∅
+        │   │   │   │   │           ├── flags: variable_call
+        │   │   │   │   │           └── name: "baz"
+        │   │   │   │   ├── closing_loc: ∅
+        │   │   │   │   ├── block: ∅
+        │   │   │   │   ├── flags: ∅
+        │   │   │   │   └── name: "=~"
+        │   │   │   └── locals: [:foo]
         │   │   └── @ LocalVariableReadNode (location: (82...85))
         │   │       ├── name: :foo
         │   │       └── depth: 0
@@ -159,6 +165,7 @@
         │   │   @ ArgumentsNode (location: (263...267))
         │   │   └── arguments: (length: 1)
         │   │       └── @ StringNode (location: (263...267))
+        │   │           ├── flags: ∅
         │   │           ├── opening_loc: (263...264) = "\""
         │   │           ├── content_loc: (264...266) = "hi"
         │   │           ├── closing_loc: (266...267) = "\""
@@ -177,6 +184,7 @@
             ├── opening_loc: (280...281) = "/"
             ├── parts: (length: 2)
             │   ├── @ StringNode (location: (281...285))
+            │   │   ├── flags: ∅
             │   │   ├── opening_loc: ∅
             │   │   ├── content_loc: (281...285) = "aaa "
             │   │   ├── closing_loc: ∅

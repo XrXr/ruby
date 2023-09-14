@@ -42,7 +42,7 @@ module YARP
       )
 
       assert_errors expected, "for in 1..10\ni\nend", [
-        ["Expected an index after `for`", 0..0]
+        ["Expected an index after `for`", 0..3]
       ]
     end
 
@@ -58,7 +58,7 @@ module YARP
       )
 
       assert_errors expected, "for end", [
-        ["Expected an index after `for`", 0..0],
+        ["Expected an index after `for`", 0..3],
         ["Expected an `in` after the index in a `for` statement", 3..3],
         ["Expected a collection after the `in` in a `for` statement", 3..3]
       ]
@@ -601,7 +601,7 @@ module YARP
     end
 
     def test_do_not_allow_multiple_codepoints_in_a_single_character_literal
-      expected = StringNode(Location(), Location(), nil, "\u0001\u0002")
+      expected = StringNode(0, Location(), Location(), nil, "\u0001\u0002")
 
       assert_errors expected, '?\u{0001 0002}', [
         ["Invalid Unicode escape sequence; multiple codepoints are not allowed in a character literal", 9..12]
@@ -615,7 +615,7 @@ module YARP
     end
 
     def test_do_not_allow_more_than_6_hexadecimal_digits_in_u_Unicode_character_notation
-      expected = StringNode(Location(), Location(), Location(), "\u0001")
+      expected = StringNode(0, Location(), Location(), Location(), "\u0001")
 
       assert_errors expected, '"\u{0000001}"', [
         ["Invalid Unicode escape sequence; maximum length is 6 digits", 4..11],
@@ -623,7 +623,7 @@ module YARP
     end
 
     def test_do_not_allow_characters_other_than_0_9_a_f_and_A_F_in_u_Unicode_character_notation
-      expected = StringNode(Location(), Location(), Location(), "\u0000z}")
+      expected = StringNode(0, Location(), Location(), Location(), "\u0000z}")
 
       assert_errors expected, '"\u{000z}"', [
         ["Invalid Unicode escape sequence", 7..7],
@@ -1137,10 +1137,22 @@ module YARP
       assert_errors expected, "def foo(a = 1,b,*c);end", [["Unexpected parameter `*`", 16..17]]
     end
 
-    def test_invalid_operator_write
+    def test_invalid_message_name
+      result = YARP.parse("+.@foo,+=foo")
+      assert_equal "", result.value.statements.body.first.write_name
+    end
+
+    def test_invalid_operator_write_fcall
       source = "foo! += 1"
       assert_errors expression(source), source, [
         ["Unexpected write target", 0..4]
+      ]
+    end
+
+    def test_invalid_operator_write_dot
+      source = "foo.+= 1"
+      assert_errors expression(source), source, [
+        ["Unexpected write target", 5..6]
       ]
     end
 
@@ -1153,6 +1165,30 @@ module YARP
     def test_invalid_global_variable_write
       assert_errors expression("$',"), "$',", [
         ["Immutable variable as a write target", 0..2]
+      ]
+    end
+
+    def test_call_with_block_and_write
+      source = "foo {} &&= 1"
+      assert_errors expression(source), source, [
+        ["Unexpected write target", 0..6],
+        ["Unexpected operator after a call with a block", 7..10]
+      ]
+    end
+
+    def test_call_with_block_or_write
+      source = "foo {} ||= 1"
+      assert_errors expression(source), source, [
+        ["Unexpected write target", 0..6],
+        ["Unexpected operator after a call with a block", 7..10]
+      ]
+    end
+
+    def test_call_with_block_operator_write
+      source = "foo {} += 1"
+      assert_errors expression(source), source, [
+        ["Unexpected write target", 0..6],
+        ["Unexpected operator after a call with a block", 7..9]
       ]
     end
 

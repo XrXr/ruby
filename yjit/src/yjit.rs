@@ -115,7 +115,7 @@ fn rb_bug_panic_hook() {
 #[no_mangle]
 pub extern "C" fn rb_yjit_iseq_gen_entry_point(iseq: IseqPtr, ec: EcPtr, jit_exception: bool) -> *const u8 {
     // Don't compile when there is insufficient native stack space
-    if unsafe { rb_ec_stack_check(ec as *mut _) } != 0 {
+    if unsafe { rb_ec_stack_check(ec as _) } != 0 {
         return std::ptr::null();
     }
 

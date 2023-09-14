@@ -1508,12 +1508,17 @@ yp_call_node_variable_call_p(yp_call_node_t *node) {
 // Initialize the read name by reading the write name and chopping off the '='.
 static void
 yp_call_write_read_name_init(yp_string_t *read_name, yp_string_t *write_name) {
-    size_t length = write_name->length - 1;
+    if (write_name->length >= 1) {
+        size_t length = write_name->length - 1;
 
-    void *memory = malloc(length);
-    memcpy(memory, write_name->source, length);
+        void *memory = malloc(length);
+        memcpy(memory, write_name->source, length);
 
-    yp_string_owned_init(read_name, (uint8_t *) memory, length);
+        yp_string_owned_init(read_name, (uint8_t *) memory, length);
+    } else {
+        // We can get here if the message was missing because of a syntax error.
+        yp_string_constant_init(read_name, "", 0);
+    }
 }
 
 // Allocate and initialize a new CallAndWriteNode node.
@@ -2207,7 +2212,13 @@ static yp_false_node_t *
 yp_false_node_create(yp_parser_t *parser, const yp_token_t *token) {
     assert(token->type == YP_TOKEN_KEYWORD_FALSE);
     yp_false_node_t *node = YP_ALLOC_NODE(parser, yp_false_node_t);
-    *node = (yp_false_node_t) {{ .type = YP_FALSE_NODE, .location = YP_LOCATION_TOKEN_VALUE(token) }};
+
+    *node = (yp_false_node_t) {{
+        .type = YP_FALSE_NODE,
+        .flags = YP_NODE_FLAG_STATIC_LITERAL,
+        .location = YP_LOCATION_TOKEN_VALUE(token)
+    }};
+
     return node;
 }
 
@@ -2257,7 +2268,13 @@ static yp_float_node_t *
 yp_float_node_create(yp_parser_t *parser, const yp_token_t *token) {
     assert(token->type == YP_TOKEN_FLOAT);
     yp_float_node_t *node = YP_ALLOC_NODE(parser, yp_float_node_t);
-    *node = (yp_float_node_t) {{ .type = YP_FLOAT_NODE, .location = YP_LOCATION_TOKEN_VALUE(token) }};
+
+    *node = (yp_float_node_t) {{
+        .type = YP_FLOAT_NODE,
+        .flags = YP_NODE_FLAG_STATIC_LITERAL,
+        .location = YP_LOCATION_TOKEN_VALUE(token)
+    }};
+
     return node;
 }
 
@@ -2270,6 +2287,7 @@ yp_float_node_imaginary_create(yp_parser_t *parser, const yp_token_t *token) {
     *node = (yp_imaginary_node_t) {
         {
             .type = YP_IMAGINARY_NODE,
+            .flags = YP_NODE_FLAG_STATIC_LITERAL,
             .location = YP_LOCATION_TOKEN_VALUE(token)
         },
         .numeric = (yp_node_t *) yp_float_node_create(parser, &((yp_token_t) {
@@ -2291,6 +2309,7 @@ yp_float_node_rational_create(yp_parser_t *parser, const yp_token_t *token) {
     *node = (yp_rational_node_t) {
         {
             .type = YP_RATIONAL_NODE,
+            .flags = YP_NODE_FLAG_STATIC_LITERAL,
             .location = YP_LOCATION_TOKEN_VALUE(token)
         },
         .numeric = (yp_node_t *) yp_float_node_create(parser, &((yp_token_t) {
@@ -2312,6 +2331,7 @@ yp_float_node_rational_imaginary_create(yp_parser_t *parser, const yp_token_t *t
     *node = (yp_imaginary_node_t) {
         {
             .type = YP_IMAGINARY_NODE,
+            .flags = YP_NODE_FLAG_STATIC_LITERAL,
             .location = YP_LOCATION_TOKEN_VALUE(token)
         },
         .numeric = (yp_node_t *) yp_float_node_rational_create(parser, &((yp_token_t) {
@@ -2725,7 +2745,7 @@ yp_integer_node_create(yp_parser_t *parser, yp_node_flags_t base, const yp_token
 
     *node = (yp_integer_node_t) {{
         .type = YP_INTEGER_NODE,
-        .flags = base,
+        .flags = base | YP_NODE_FLAG_STATIC_LITERAL,
         .location = YP_LOCATION_TOKEN_VALUE(token)
     }};
 
@@ -2741,6 +2761,7 @@ yp_integer_node_imaginary_create(yp_parser_t *parser, yp_node_flags_t base, cons
     *node = (yp_imaginary_node_t) {
         {
             .type = YP_IMAGINARY_NODE,
+            .flags = YP_NODE_FLAG_STATIC_LITERAL,
             .location = YP_LOCATION_TOKEN_VALUE(token)
         },
         .numeric = (yp_node_t *) yp_integer_node_create(parser, base, &((yp_token_t) {
@@ -2762,6 +2783,7 @@ yp_integer_node_rational_create(yp_parser_t *parser, yp_node_flags_t base, const
     *node = (yp_rational_node_t) {
         {
             .type = YP_RATIONAL_NODE,
+            .flags = YP_NODE_FLAG_STATIC_LITERAL,
             .location = YP_LOCATION_TOKEN_VALUE(token)
         },
         .numeric = (yp_node_t *) yp_integer_node_create(parser, base, &((yp_token_t) {
@@ -2783,6 +2805,7 @@ yp_integer_node_rational_imaginary_create(yp_parser_t *parser, yp_node_flags_t b
     *node = (yp_imaginary_node_t) {
         {
             .type = YP_IMAGINARY_NODE,
+            .flags = YP_NODE_FLAG_STATIC_LITERAL,
             .location = YP_LOCATION_TOKEN_VALUE(token)
         },
         .numeric = (yp_node_t *) yp_integer_node_rational_create(parser, base, &((yp_token_t) {
@@ -3348,6 +3371,23 @@ yp_match_required_node_create(yp_parser_t *parser, yp_node_t *value, yp_node_t *
     return node;
 }
 
+// Allocate and initialize a new MatchWriteNode node.
+static yp_match_write_node_t *
+yp_match_write_node_create(yp_parser_t *parser, yp_call_node_t *call) {
+    yp_match_write_node_t *node = YP_ALLOC_NODE(parser, yp_match_write_node_t);
+
+    *node = (yp_match_write_node_t) {
+        {
+            .type = YP_MATCH_WRITE_NODE,
+            .location = call->base.location
+        },
+        .call = call
+    };
+
+    yp_constant_id_list_init(&node->locals);
+    return node;
+}
+
 // Allocate a new ModuleNode node.
 static yp_module_node_t *
 yp_module_node_create(yp_parser_t *parser, yp_constant_id_list_t *locals, const yp_token_t *module_keyword, yp_node_t *constant_path, const yp_token_t *name, yp_node_t *body, const yp_token_t *end_keyword) {
@@ -3458,7 +3498,12 @@ yp_nil_node_create(yp_parser_t *parser, const yp_token_t *token) {
     assert(token->type == YP_TOKEN_KEYWORD_NIL);
     yp_nil_node_t *node = YP_ALLOC_NODE(parser, yp_nil_node_t);
 
-    *node = (yp_nil_node_t) {{ .type = YP_NIL_NODE, .location = YP_LOCATION_TOKEN_VALUE(token) }};
+    *node = (yp_nil_node_t) {{
+        .type = YP_NIL_NODE,
+        .flags = YP_NODE_FLAG_STATIC_LITERAL,
+        .location = YP_LOCATION_TOKEN_VALUE(token)
+    }};
+
     return node;
 }
 
@@ -4005,7 +4050,12 @@ yp_self_node_create(yp_parser_t *parser, const yp_token_t *token) {
     assert(token->type == YP_TOKEN_KEYWORD_SELF);
     yp_self_node_t *node = YP_ALLOC_NODE(parser, yp_self_node_t);
 
-    *node = (yp_self_node_t) {{ .type = YP_SELF_NODE, .location = YP_LOCATION_TOKEN_VALUE(token) }};
+    *node = (yp_self_node_t) {{
+        .type = YP_SELF_NODE,
+        .flags = YP_NODE_FLAG_STATIC_LITERAL,
+        .location = YP_LOCATION_TOKEN_VALUE(token)
+    }};
+
     return node;
 }
 
@@ -4039,7 +4089,12 @@ yp_source_encoding_node_create(yp_parser_t *parser, const yp_token_t *token) {
     assert(token->type == YP_TOKEN_KEYWORD___ENCODING__);
     yp_source_encoding_node_t *node = YP_ALLOC_NODE(parser, yp_source_encoding_node_t);
 
-    *node = (yp_source_encoding_node_t) {{ .type = YP_SOURCE_ENCODING_NODE, .location = YP_LOCATION_TOKEN_VALUE(token) }};
+    *node = (yp_source_encoding_node_t) {{
+        .type = YP_SOURCE_ENCODING_NODE,
+        .flags = YP_NODE_FLAG_STATIC_LITERAL,
+        .location = YP_LOCATION_TOKEN_VALUE(token)
+    }};
+
     return node;
 }
 
@@ -4052,6 +4107,7 @@ yp_source_file_node_create(yp_parser_t *parser, const yp_token_t *file_keyword) 
     *node = (yp_source_file_node_t) {
         {
             .type = YP_SOURCE_FILE_NODE,
+            .flags = YP_NODE_FLAG_STATIC_LITERAL,
             .location = YP_LOCATION_TOKEN_VALUE(file_keyword),
         },
         .filepath = parser->filepath_string,
@@ -4066,7 +4122,12 @@ yp_source_line_node_create(yp_parser_t *parser, const yp_token_t *token) {
     assert(token->type == YP_TOKEN_KEYWORD___LINE__);
     yp_source_line_node_t *node = YP_ALLOC_NODE(parser, yp_source_line_node_t);
 
-    *node = (yp_source_line_node_t) {{ .type = YP_SOURCE_LINE_NODE, .location = YP_LOCATION_TOKEN_VALUE(token) }};
+    *node = (yp_source_line_node_t) {{
+        .type = YP_SOURCE_LINE_NODE,
+        .flags = YP_NODE_FLAG_STATIC_LITERAL,
+        .location = YP_LOCATION_TOKEN_VALUE(token)
+    }};
+
     return node;
 }
 
@@ -4158,10 +4219,16 @@ yp_string_concat_node_create(yp_parser_t *parser, yp_node_t *left, yp_node_t *ri
 static yp_string_node_t *
 yp_string_node_create(yp_parser_t *parser, const yp_token_t *opening, const yp_token_t *content, const yp_token_t *closing) {
     yp_string_node_t *node = YP_ALLOC_NODE(parser, yp_string_node_t);
+    yp_node_flags_t flags = 0;
+
+    if (parser->frozen_string_literal) {
+        flags = YP_NODE_FLAG_STATIC_LITERAL | YP_STRING_FLAGS_FROZEN;
+    }
 
     *node = (yp_string_node_t) {
         {
             .type = YP_STRING_NODE,
+            .flags = flags,
             .location = {
                 .start = (opening->type == YP_TOKEN_NOT_PROVIDED ? content->start : opening->start),
                 .end = (closing->type == YP_TOKEN_NOT_PROVIDED ? content->end : closing->end)
@@ -4220,6 +4287,7 @@ yp_symbol_node_create(yp_parser_t *parser, const yp_token_t *opening, const yp_t
     *node = (yp_symbol_node_t) {
         {
             .type = YP_SYMBOL_NODE,
+            .flags = YP_NODE_FLAG_STATIC_LITERAL,
             .location = {
                 .start = (opening->type == YP_TOKEN_NOT_PROVIDED ? value->start : opening->start),
                 .end = (closing->type == YP_TOKEN_NOT_PROVIDED ? value->end : closing->end)
@@ -4297,6 +4365,7 @@ yp_string_node_to_symbol_node(yp_parser_t *parser, yp_string_node_t *node, const
     *new_node = (yp_symbol_node_t) {
         {
             .type = YP_SYMBOL_NODE,
+            .flags = YP_NODE_FLAG_STATIC_LITERAL,
             .location = {
                 .start = opening->start,
                 .end = closing->end
@@ -4320,10 +4389,16 @@ yp_string_node_to_symbol_node(yp_parser_t *parser, yp_string_node_t *node, const
 static yp_string_node_t *
 yp_symbol_node_to_string_node(yp_parser_t *parser, yp_symbol_node_t *node) {
     yp_string_node_t *new_node = YP_ALLOC_NODE(parser, yp_string_node_t);
+    yp_node_flags_t flags = 0;
+
+    if (parser->frozen_string_literal) {
+        flags = YP_NODE_FLAG_STATIC_LITERAL | YP_STRING_FLAGS_FROZEN;
+    }
 
     *new_node = (yp_string_node_t) {
         {
             .type = YP_STRING_NODE,
+            .flags = flags,
             .location = node->base.location
         },
         .opening_loc = node->opening_loc,
@@ -4346,7 +4421,12 @@ yp_true_node_create(yp_parser_t *parser, const yp_token_t *token) {
     assert(token->type == YP_TOKEN_KEYWORD_TRUE);
     yp_true_node_t *node = YP_ALLOC_NODE(parser, yp_true_node_t);
 
-    *node = (yp_true_node_t) {{ .type = YP_TRUE_NODE, .location = YP_LOCATION_TOKEN_VALUE(token) }};
+    *node = (yp_true_node_t) {{
+        .type = YP_TRUE_NODE,
+        .flags = YP_NODE_FLAG_STATIC_LITERAL,
+        .location = YP_LOCATION_TOKEN_VALUE(token)
+    }};
+
     return node;
 }
 
@@ -4951,8 +5031,7 @@ parser_lex_encoding_comment_start(yp_parser_t *parser, const uint8_t *cursor, pt
 static void
 parser_lex_encoding_comment(yp_parser_t *parser) {
     const uint8_t *start = parser->current.start + 1;
-    const uint8_t *end = next_newline(start, parser->end - start);
-    if (end == NULL) end = parser->end;
+    const uint8_t *end = parser->current.end;
 
     // These are the patterns we're going to match to find the encoding comment.
     // This is definitely not complete or even really correct.
@@ -5050,6 +5129,39 @@ parser_lex_encoding_comment(yp_parser_t *parser) {
     // case we'll keep using the default encoding but add an error to the
     // parser to indicate an unsuccessful parse.
     yp_diagnostic_list_append(&parser->error_list, encoding_start, encoding_end, YP_ERR_INVALID_ENCODING_MAGIC_COMMENT);
+}
+
+// Check if this is a magic comment that includes the frozen_string_literal
+// pragma. If it does, set that field on the parser.
+static void
+parser_lex_frozen_string_literal_comment(yp_parser_t *parser) {
+    const uint8_t *cursor = parser->current.start + 1;
+    const uint8_t *end = parser->current.end;
+
+    size_t key_length = strlen("frozen_string_literal");
+    if (key_length > (size_t) (end - cursor)) return;
+
+    const uint8_t *cursor_limit = cursor + (end - cursor) - key_length + 1;
+
+    while ((cursor = yp_memchr(cursor, 'f', (size_t) (cursor_limit - cursor), parser->encoding_changed, &parser->encoding)) != NULL) {
+        if (memcmp(cursor, "frozen_string_literal", key_length) == 0) {
+            cursor += key_length;
+            cursor += yp_strspn_inline_whitespace(cursor, end - cursor);
+
+            if (*cursor == ':' || *cursor == '=') {
+                cursor++;
+                cursor += yp_strspn_inline_whitespace(cursor, end - cursor);
+
+                if (cursor + 4 <= end && yp_strncasecmp(cursor, (const uint8_t *) "true", 4) == 0) {
+                    parser->frozen_string_literal = true;
+                }
+
+                return;
+            }
+        }
+
+        cursor++;
+    }
 }
 
 /******************************************************************************/
@@ -5982,6 +6094,11 @@ parser_lex(yp_parser_t *parser) {
     // already seen a comment.
     bool lexed_comment = false;
 
+    // Here we cache the current value of the semantic token seen flag. This is
+    // used to reset it in case we find a token that shouldn't flip this flag.
+    unsigned int semantic_token_seen = parser->semantic_token_seen;
+    parser->semantic_token_seen = true;
+
     switch (parser->lex_modes.current->mode) {
         case YP_LEX_DEFAULT:
         case YP_LEX_EMBEXPR:
@@ -6083,12 +6200,18 @@ parser_lex(yp_parser_t *parser) {
                         parser_lex_encoding_comment(parser);
                     }
 
+                    if (!semantic_token_seen) {
+                        parser_lex_frozen_string_literal_comment(parser);
+                    }
+
                     lexed_comment = true;
                 }
                 /* fallthrough */
                 case '\r':
                 case '\n': {
+                    parser->semantic_token_seen = semantic_token_seen & 0x1;
                     size_t eol_length = match_eol_at(parser, parser->current.end - 1);
+
                     if (eol_length) {
                         // The only way you can have carriage returns in this
                         // particular loop is if you have a carriage return
@@ -8131,6 +8254,26 @@ parse_starred_expression(yp_parser_t *parser, yp_binding_power_t binding_power, 
     return parse_expression(parser, binding_power, diag_id);
 }
 
+// Convert the name of a method into the corresponding write method name. For
+// exmaple, foo would be turned into foo=.
+static void
+parse_write_name(yp_string_t *string) {
+    // The method name needs to change. If we previously had
+    // foo, we now need foo=. In this case we'll allocate a new
+    // owned string, copy the previous method name in, and
+    // append an =.
+    size_t length = yp_string_length(string);
+    uint8_t *name = calloc(length + 1, sizeof(uint8_t));
+    if (name == NULL) return;
+
+    memcpy(name, yp_string_source(string), length);
+    name[length] = '=';
+
+    // Now switch the name to the new string.
+    yp_string_free(string);
+    yp_string_owned_init(string, name, length + 1);
+}
+
 // Convert the given node into a valid target node.
 static yp_node_t *
 parse_target(yp_parser_t *parser, yp_node_t *target) {
@@ -8185,7 +8328,9 @@ parse_target(yp_parser_t *parser, yp_node_t *target) {
             // If we have no arguments to the call node and we need this to be a
             // target then this is either a method call or a local variable write.
             if (
-                ((call->message_loc.start != NULL) && (call->message_loc.end[-1] != '!') && (call->message_loc.end[-1] != '?')) &&
+                (call->message_loc.start != NULL) &&
+                (call->message_loc.end[-1] != '!') &&
+                (call->message_loc.end[-1] != '?') &&
                 (call->opening_loc.start == NULL) &&
                 (call->arguments == NULL) &&
                 (call->block == NULL)
@@ -8218,22 +8363,10 @@ parse_target(yp_parser_t *parser, yp_node_t *target) {
                     return target;
                 }
 
-                // The method name needs to change. If we previously had foo, we now
-                // need foo=. In this case we'll allocate a new owned string, copy
-                // the previous method name in, and append an =.
-                size_t length = yp_string_length(&call->name);
-
-                uint8_t *name = calloc(length + 1, sizeof(uint8_t));
-                if (name == NULL) return NULL;
-
-                memcpy(name, yp_string_source(&call->name), length);
-                name[length] = '=';
-
-                // Now switch the name to the new string.
-                yp_string_free(&call->name);
-                yp_string_owned_init(&call->name, name, length + 1);
-
-                return target;
+                if (*call->message_loc.start == '_' || parser->encoding.alnum_char(call->message_loc.start, call->message_loc.end - call->message_loc.start)) {
+                    parse_write_name(&call->name);
+                    return (yp_node_t *) call;
+                }
             }
 
             // If there is no call operator and the message is "[]" then this is
@@ -8320,9 +8453,14 @@ parse_write(yp_parser_t *parser, yp_node_t *target, yp_token_t *operator, yp_nod
         }
         case YP_CALL_NODE: {
             yp_call_node_t *call = (yp_call_node_t *) target;
+
             // If we have no arguments to the call node and we need this to be a
-            // target then this is either a method call or a local variable write.
+            // target then this is either a method call or a local variable
+            // write.
             if (
+                (call->message_loc.start != NULL) &&
+                (call->message_loc.end[-1] != '!') &&
+                (call->message_loc.end[-1] != '?') &&
                 (call->opening_loc.start == NULL) &&
                 (call->arguments == NULL) &&
                 (call->block == NULL)
@@ -8352,37 +8490,26 @@ parse_write(yp_parser_t *parser, yp_node_t *target, yp_token_t *operator, yp_nod
                     return target;
                 }
 
-                // When we get here, we have a method call, because it was
-                // previously marked as a method call but now we have an =. This
-                // looks like:
-                //
-                //     foo.bar = 1
-                //
-                // When it was parsed in the prefix position, foo.bar was seen as a
-                // method call with no arguments. Now we have an =, so we know it's
-                // a method call with an argument. In this case we will create the
-                // arguments node, parse the argument, and add it to the list.
-                yp_arguments_node_t *arguments = yp_arguments_node_create(parser);
-                call->arguments = arguments;
-                yp_arguments_node_arguments_append(arguments, value);
-                target->location.end = arguments->base.location.end;
+                if (*call->message_loc.start == '_' || parser->encoding.alnum_char(call->message_loc.start, call->message_loc.end - call->message_loc.start)) {
+                    // When we get here, we have a method call, because it was
+                    // previously marked as a method call but now we have an =. This
+                    // looks like:
+                    //
+                    //     foo.bar = 1
+                    //
+                    // When it was parsed in the prefix position, foo.bar was seen as a
+                    // method call with no arguments. Now we have an =, so we know it's
+                    // a method call with an argument. In this case we will create the
+                    // arguments node, parse the argument, and add it to the list.
+                    yp_arguments_node_t *arguments = yp_arguments_node_create(parser);
+                    call->arguments = arguments;
 
-                // The method name needs to change. If we previously had foo, we now
-                // need foo=. In this case we'll allocate a new owned string, copy
-                // the previous method name in, and append an =.
-                size_t length = yp_string_length(&call->name);
+                    yp_arguments_node_arguments_append(arguments, value);
+                    call->base.location.end = arguments->base.location.end;
 
-                uint8_t *name = calloc(length + 1, sizeof(uint8_t));
-                if (name == NULL) return NULL;
-
-                memcpy(name, yp_string_source(&call->name), length);
-                name[length] = '=';
-
-                // Now switch the name to the new string.
-                yp_string_free(&call->name);
-                yp_string_owned_init(&call->name, name, length + 1);
-
-                return target;
+                    parse_write_name(&call->name);
+                    return (yp_node_t *) call;
+                }
             }
 
             // If there is no call operator and the message is "[]" then this is
@@ -8419,7 +8546,7 @@ parse_write(yp_parser_t *parser, yp_node_t *target, yp_token_t *operator, yp_nod
             // In this case we have a node that we don't know how to convert into a
             // target. We need to treat it as an error. For now, we'll mark it as an
             // error and just skip right past it.
-            yp_diagnostic_list_append(&parser->error_list, operator->start, operator->end, YP_ERR_EXPECT_EXPRESSION_AFTER_EQUAL);
+            yp_diagnostic_list_append(&parser->error_list, operator->start, operator->end, YP_ERR_WRITE_TARGET_UNEXPECTED);
             return target;
     }
 }
@@ -8434,108 +8561,46 @@ parse_write(yp_parser_t *parser, yp_node_t *target, yp_token_t *operator, yp_nod
 // target node or a multi-target node.
 static yp_node_t *
 parse_targets(yp_parser_t *parser, yp_node_t *first_target, yp_binding_power_t binding_power) {
-    yp_token_t operator = not_provided(parser);
-
-    // The first_target parameter can be NULL in the case that we're parsing a
-    // location that we know requires a multi write, as in the case of a for loop.
-    // In this case we will set up the parsing loop slightly differently.
-    if (first_target != NULL) {
-        first_target = parse_target(parser, first_target);
-
-        if (!match1(parser, YP_TOKEN_COMMA)) {
-            return first_target;
-        }
-    }
+    first_target = parse_target(parser, first_target);
+    if (!match1(parser, YP_TOKEN_COMMA)) return first_target;
 
     yp_multi_target_node_t *result = yp_multi_target_node_create(parser);
-    if (first_target != NULL) {
-        yp_multi_target_node_targets_append(result, first_target);
-    }
+    yp_multi_target_node_targets_append(result, first_target);
+    bool has_splat = YP_NODE_TYPE_P(first_target, YP_SPLAT_NODE);
 
-    bool has_splat = false;
-
-    if (first_target == NULL || accept1(parser, YP_TOKEN_COMMA)) {
-        do {
-            if (accept1(parser, YP_TOKEN_USTAR)) {
-                // Here we have a splat operator. It can have a name or be anonymous. It
-                // can be the final target or be in the middle if there haven't been any
-                // others yet.
-
-                if (has_splat) {
-                    yp_diagnostic_list_append(&parser->error_list, parser->previous.start, parser->previous.end, YP_ERR_MULTI_ASSIGN_MULTI_SPLATS);
-                }
-
-                yp_token_t star_operator = parser->previous;
-                yp_node_t *name = NULL;
-
-                if (token_begins_expression_p(parser->current.type)) {
-                    name = parse_expression(parser, binding_power, YP_ERR_EXPECT_EXPRESSION_AFTER_STAR);
-                    name = parse_target(parser, name);
-                }
-
-                yp_node_t *splat = (yp_node_t *) yp_splat_node_create(parser, &star_operator, name);
-                yp_multi_target_node_targets_append(result, splat);
-                has_splat = true;
-            } else if (accept1(parser, YP_TOKEN_PARENTHESIS_LEFT)) {
-                // Here we have a parenthesized list of targets. We'll recurse down into
-                // the parentheses by calling parse_targets again and then finish out
-                // the node when it returns.
-
-                yp_token_t lparen = parser->previous;
-                yp_node_t *first_child_target = parse_expression(parser, YP_BINDING_POWER_STATEMENT, YP_ERR_EXPECT_EXPRESSION_AFTER_LPAREN);
-                yp_node_t *child_target = parse_targets(parser, first_child_target, YP_BINDING_POWER_STATEMENT);
-
-                expect1(parser, YP_TOKEN_PARENTHESIS_RIGHT, YP_ERR_EXPECT_RPAREN_AFTER_MULTI);
-                yp_token_t rparen = parser->previous;
-
-                if (YP_NODE_TYPE_P(child_target, YP_MULTI_TARGET_NODE) && first_target == NULL && result->targets.size == 0) {
-                    yp_node_destroy(parser, (yp_node_t *) result);
-                    result = (yp_multi_target_node_t *) child_target;
-                    result->base.location.start = lparen.start;
-                    result->base.location.end = rparen.end;
-                    result->lparen_loc = YP_LOCATION_TOKEN_VALUE(&lparen);
-                    result->rparen_loc = YP_LOCATION_TOKEN_VALUE(&rparen);
-                } else {
-                    yp_multi_target_node_t *target;
-
-                    if (YP_NODE_TYPE_P(child_target, YP_MULTI_TARGET_NODE)) {
-                        target = (yp_multi_target_node_t *) child_target;
-                    } else {
-                        target = yp_multi_target_node_create(parser);
-                        yp_multi_target_node_targets_append(target, child_target);
-                    }
-
-                    target->base.location.start = lparen.start;
-                    target->base.location.end = rparen.end;
-                    target->lparen_loc = YP_LOCATION_TOKEN_VALUE(&lparen);
-                    target->rparen_loc = YP_LOCATION_TOKEN_VALUE(&rparen);
-
-                    yp_multi_target_node_targets_append(result, (yp_node_t *) target);
-                }
-            } else {
-                if (!token_begins_expression_p(parser->current.type) && !match1(parser, YP_TOKEN_USTAR)) {
-                    if (first_target == NULL && result->targets.size == 0) {
-                        // If we get here, then we weren't able to parse anything at all, so
-                        // we need to return a missing node.
-                        yp_node_destroy(parser, (yp_node_t *) result);
-                        yp_diagnostic_list_append(&parser->error_list, operator.start, operator.end, YP_ERR_FOR_INDEX);
-                        return (yp_node_t *) yp_missing_node_create(parser, operator.start, operator.end);
-                    }
-
-                    // If we get here, then we have a trailing , in a multi write node.
-                    // We need to indicate this somehow in the tree, so we'll add an
-                    // anonymous splat.
-                    yp_node_t *splat = (yp_node_t *) yp_splat_node_create(parser, &parser->previous, NULL);
-                    yp_multi_target_node_targets_append(result, splat);
-                    return (yp_node_t *) result;
-                }
-
-                yp_node_t *target = parse_expression(parser, binding_power, YP_ERR_EXPECT_EXPRESSION_AFTER_COMMA);
-                target = parse_target(parser, target);
-
-                yp_multi_target_node_targets_append(result, target);
+    while (accept1(parser, YP_TOKEN_COMMA)) {
+        if (accept1(parser, YP_TOKEN_USTAR)) {
+            // Here we have a splat operator. It can have a name or be
+            // anonymous. It can be the final target or be in the middle if
+            // there haven't been any others yet.
+            if (has_splat) {
+                yp_diagnostic_list_append(&parser->error_list, parser->previous.start, parser->previous.end, YP_ERR_MULTI_ASSIGN_MULTI_SPLATS);
             }
-        } while (accept1(parser, YP_TOKEN_COMMA));
+
+            yp_token_t star_operator = parser->previous;
+            yp_node_t *name = NULL;
+
+            if (token_begins_expression_p(parser->current.type)) {
+                name = parse_expression(parser, binding_power, YP_ERR_EXPECT_EXPRESSION_AFTER_STAR);
+                name = parse_target(parser, name);
+            }
+
+            yp_node_t *splat = (yp_node_t *) yp_splat_node_create(parser, &star_operator, name);
+            yp_multi_target_node_targets_append(result, splat);
+            has_splat = true;
+        } else if (token_begins_expression_p(parser->current.type)) {
+            yp_node_t *target = parse_expression(parser, binding_power, YP_ERR_EXPECT_EXPRESSION_AFTER_COMMA);
+            target = parse_target(parser, target);
+
+            yp_multi_target_node_targets_append(result, target);
+        } else {
+            // If we get here, then we have a trailing , in a multi target node.
+            // We need to indicate this somehow in the tree, so we'll add an
+            // anonymous splat.
+            yp_node_t *splat = (yp_node_t *) yp_splat_node_create(parser, &parser->previous, NULL);
+            yp_multi_target_node_targets_append(result, splat);
+            break;
+        }
     }
 
     return (yp_node_t *) result;
@@ -11193,28 +11258,27 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
                 parser_lex(parser);
                 yp_accepts_block_stack_pop(parser);
 
-                // If we have a single statement and are ending on a right parenthesis,
-                // then we need to check if this is possibly a multiple target node.
-                if (binding_power == YP_BINDING_POWER_STATEMENT && YP_NODE_TYPE_P(statement, YP_MULTI_TARGET_NODE)) {
-                    yp_node_t *target;
-                    yp_multi_target_node_t *multi_target = (yp_multi_target_node_t *) statement;
+                // If we have a single statement and are ending on a right
+                // parenthesis, then we need to check if this is possibly a
+                // multiple target node.
+                if (YP_NODE_TYPE_P(statement, YP_MULTI_TARGET_NODE)) {
+                    yp_multi_target_node_t *multi_target;
+                    if (((yp_multi_target_node_t *) statement)->lparen_loc.start == NULL) {
+                        multi_target = (yp_multi_target_node_t *) statement;
+                    } else {
+                        multi_target = yp_multi_target_node_create(parser);
+                        yp_multi_target_node_targets_append(multi_target, statement);
+                    }
 
                     yp_location_t lparen_loc = YP_LOCATION_TOKEN_VALUE(&opening);
                     yp_location_t rparen_loc = YP_LOCATION_TOKEN_VALUE(&parser->previous);
 
-                    if (multi_target->lparen_loc.start == NULL) {
-                        multi_target->base.location.start = lparen_loc.start;
-                        multi_target->base.location.end = rparen_loc.end;
-                        multi_target->lparen_loc = lparen_loc;
-                        multi_target->rparen_loc = rparen_loc;
-                        target = (yp_node_t *) multi_target;
-                    } else {
-                        yp_multi_target_node_t *parent_target = yp_multi_target_node_create(parser);
-                        yp_multi_target_node_targets_append(parent_target, (yp_node_t *) multi_target);
-                        target = (yp_node_t *) parent_target;
-                    }
+                    multi_target->lparen_loc = lparen_loc;
+                    multi_target->rparen_loc = rparen_loc;
+                    multi_target->base.location.start = lparen_loc.start;
+                    multi_target->base.location.end = rparen_loc.end;
 
-                    return parse_targets(parser, target, YP_BINDING_POWER_INDEX);
+                    return parse_targets(parser, (yp_node_t *) multi_target, YP_BINDING_POWER_INDEX);
                 }
 
                 // If we have a single statement and are ending on a right parenthesis
@@ -11226,9 +11290,9 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
                 return (yp_node_t *) yp_parentheses_node_create(parser, &opening, (yp_node_t *) statements, &parser->previous);
             }
 
-            // If we have more than one statement in the set of parentheses, then we
-            // are going to parse all of them as a list of statements. We'll do that
-            // here.
+            // If we have more than one statement in the set of parentheses,
+            // then we are going to parse all of them as a list of statements.
+            // We'll do that here.
             context_push(parser, YP_CONTEXT_PARENS);
             yp_statements_node_t *statements = yp_statements_node_create(parser);
             yp_statements_node_body_append(statements, statement);
@@ -11240,11 +11304,11 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
                 yp_node_t *node = parse_expression(parser, YP_BINDING_POWER_STATEMENT, YP_ERR_CANNOT_PARSE_EXPRESSION);
                 yp_statements_node_body_append(statements, node);
 
-                // If we're recovering from a syntax error, then we need to stop parsing the
-                // statements now.
+                // If we're recovering from a syntax error, then we need to stop
+                // parsing the statements now.
                 if (parser->recovering) {
-                    // If this is the level of context where the recovery has happened, then
-                    // we can mark the parser as done recovering.
+                    // If this is the level of context where the recovery has
+                    // happened, then we can mark the parser as done recovering.
                     if (match1(parser, YP_TOKEN_PARENTHESIS_RIGHT)) parser->recovering = false;
                     break;
                 }
@@ -12264,8 +12328,29 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
         case YP_TOKEN_KEYWORD_FOR: {
             parser_lex(parser);
             yp_token_t for_keyword = parser->previous;
+            yp_node_t *index;
 
-            yp_node_t *index = parse_targets(parser, NULL, YP_BINDING_POWER_INDEX);
+            // First, parse out the first index expression.
+            if (accept1(parser, YP_TOKEN_USTAR)) {
+                yp_token_t star_operator = parser->previous;
+                yp_node_t *name = NULL;
+
+                if (token_begins_expression_p(parser->current.type)) {
+                    name = parse_expression(parser, YP_BINDING_POWER_INDEX, YP_ERR_EXPECT_EXPRESSION_AFTER_STAR);
+                    name = parse_target(parser, name);
+                }
+
+                index = (yp_node_t *) yp_splat_node_create(parser, &star_operator, name);
+            } else if (token_begins_expression_p(parser->current.type)) {
+                index = parse_expression(parser, YP_BINDING_POWER_INDEX, YP_ERR_EXPECT_EXPRESSION_AFTER_COMMA);
+            } else {
+                yp_diagnostic_list_append(&parser->error_list, for_keyword.start, for_keyword.end, YP_ERR_FOR_INDEX);
+                index = (yp_node_t *) yp_missing_node_create(parser, for_keyword.start, for_keyword.end);
+            }
+
+            // Now, if there are multiple index expressions, parse them out.
+            index = parse_targets(parser, index, YP_BINDING_POWER_INDEX);
+
             yp_do_loop_stack_push(parser, true);
 
             expect1(parser, YP_TOKEN_KEYWORD_IN, YP_ERR_FOR_IN);
@@ -13112,6 +13197,20 @@ parse_assignment_value(yp_parser_t *parser, yp_binding_power_t previous_binding_
     return value;
 }
 
+// Ensures a call node that is about to become a call operator node does not
+// have a block attached. If it does, then we'll need to add an error message
+// and destroy the block. Ideally we would keep the node around so that
+// consumers would still have access to it, but we don't have a great structure
+// for that at the moment.
+static void
+parse_call_operator_write_block(yp_parser_t *parser, yp_call_node_t *call_node, const yp_token_t *operator) {
+    if (call_node->block != NULL) {
+        yp_diagnostic_list_append(&parser->error_list, operator->start, operator->end, YP_ERR_OPERATOR_WRITE_BLOCK);
+        yp_node_destroy(parser, (yp_node_t *) call_node->block);
+        call_node->block = NULL;
+    }
+}
+
 static inline yp_node_t *
 parse_expression_infix(yp_parser_t *parser, yp_node_t *node, yp_binding_power_t previous_binding_power, yp_binding_power_t binding_power) {
     yp_token_t token = parser->current;
@@ -13217,13 +13316,11 @@ parse_expression_infix(yp_parser_t *parser, yp_node_t *node, yp_binding_power_t 
                     return result;
                 }
                 case YP_CALL_NODE: {
-                    yp_call_node_t *call_node = (yp_call_node_t *) node;
-
                     // If we have a vcall (a method with no arguments and no
                     // receiver that could have been a local variable) then we
                     // will transform it into a local variable write.
-                    if (yp_call_node_variable_call_p(call_node)) {
-                        yp_location_t message_loc = call_node->message_loc;
+                    if (yp_call_node_variable_call_p((yp_call_node_t *) node)) {
+                        yp_location_t message_loc = ((yp_call_node_t *) node)->message_loc;
                         yp_constant_id_t constant_id = yp_parser_local_add_location(parser, message_loc.start, message_loc.end);
 
                         if (token_is_numbered_parameter(message_loc.start, message_loc.end)) {
@@ -13240,6 +13337,9 @@ parse_expression_infix(yp_parser_t *parser, yp_node_t *node, yp_binding_power_t 
 
                     parser_lex(parser);
                     node = parse_target(parser, node);
+
+                    assert(YP_NODE_TYPE_P(node, YP_CALL_NODE));
+                    parse_call_operator_write_block(parser, (yp_call_node_t *) node, &token);
 
                     yp_node_t *value = parse_expression(parser, binding_power, YP_ERR_EXPECT_EXPRESSION_AFTER_AMPAMPEQ);
                     return (yp_node_t *) yp_call_and_write_node_create(parser, (yp_call_node_t *) node, &token, value);
@@ -13318,13 +13418,11 @@ parse_expression_infix(yp_parser_t *parser, yp_node_t *node, yp_binding_power_t 
                     return result;
                 }
                 case YP_CALL_NODE: {
-                    yp_call_node_t *call_node = (yp_call_node_t *) node;
-
                     // If we have a vcall (a method with no arguments and no
                     // receiver that could have been a local variable) then we
                     // will transform it into a local variable write.
-                    if (yp_call_node_variable_call_p(call_node)) {
-                        yp_location_t message_loc = call_node->message_loc;
+                    if (yp_call_node_variable_call_p((yp_call_node_t *) node)) {
+                        yp_location_t message_loc = ((yp_call_node_t *) node)->message_loc;
                         yp_constant_id_t constant_id = yp_parser_local_add_location(parser, message_loc.start, message_loc.end);
 
                         if (token_is_numbered_parameter(message_loc.start, message_loc.end)) {
@@ -13341,6 +13439,9 @@ parse_expression_infix(yp_parser_t *parser, yp_node_t *node, yp_binding_power_t 
 
                     parser_lex(parser);
                     node = parse_target(parser, node);
+
+                    assert(YP_NODE_TYPE_P(node, YP_CALL_NODE));
+                    parse_call_operator_write_block(parser, (yp_call_node_t *) node, &token);
 
                     yp_node_t *value = parse_expression(parser, binding_power, YP_ERR_EXPECT_EXPRESSION_AFTER_PIPEPIPEEQ);
                     return (yp_node_t *) yp_call_or_write_node_create(parser, (yp_call_node_t *) node, &token, value);
@@ -13429,13 +13530,11 @@ parse_expression_infix(yp_parser_t *parser, yp_node_t *node, yp_binding_power_t 
                     return result;
                 }
                 case YP_CALL_NODE: {
-                    yp_call_node_t *call_node = (yp_call_node_t *) node;
-
                     // If we have a vcall (a method with no arguments and no
                     // receiver that could have been a local variable) then we
                     // will transform it into a local variable write.
-                    if (yp_call_node_variable_call_p(call_node)) {
-                        yp_location_t message_loc = call_node->message_loc;
+                    if (yp_call_node_variable_call_p((yp_call_node_t *) node)) {
+                        yp_location_t message_loc = ((yp_call_node_t *) node)->message_loc;
                         yp_constant_id_t constant_id = yp_parser_local_add_location(parser, message_loc.start, message_loc.end);
 
                         if (token_is_numbered_parameter(message_loc.start, message_loc.end)) {
@@ -13450,8 +13549,11 @@ parse_expression_infix(yp_parser_t *parser, yp_node_t *node, yp_binding_power_t 
                         return result;
                     }
 
-                    node = parse_target(parser, node);
                     parser_lex(parser);
+                    node = parse_target(parser, node);
+
+                    assert(YP_NODE_TYPE_P(node, YP_CALL_NODE));
+                    parse_call_operator_write_block(parser, (yp_call_node_t *) node, &token);
 
                     yp_node_t *value = parse_expression(parser, binding_power, YP_ERR_EXPECT_EXPRESSION_AFTER_OPERATOR);
                     return (yp_node_t *) yp_call_operator_write_node_create(parser, (yp_call_node_t *) node, &token, value);
@@ -13486,8 +13588,9 @@ parse_expression_infix(yp_parser_t *parser, yp_node_t *node, yp_binding_power_t 
             return (yp_node_t *) yp_or_node_create(parser, node, &token, right);
         }
         case YP_TOKEN_EQUAL_TILDE: {
-            // Note that we _must_ parse the value before adding the local variables
-            // in order to properly mirror the behavior of Ruby. For example,
+            // Note that we _must_ parse the value before adding the local
+            // variables in order to properly mirror the behavior of Ruby. For
+            // example,
             //
             //     /(?<foo>bar)/ =~ foo
             //
@@ -13495,27 +13598,36 @@ parse_expression_infix(yp_parser_t *parser, yp_node_t *node, yp_binding_power_t 
             parser_lex(parser);
             yp_node_t *argument = parse_expression(parser, binding_power, YP_ERR_EXPECT_EXPRESSION_AFTER_OPERATOR);
 
-            // If the receiver of this =~ is a regular expression node, then we need
-            // to introduce local variables for it based on its named capture groups.
+            // By default, we're going to create a call node and then return it.
+            yp_call_node_t *call = yp_call_node_binary_create(parser, node, &token, argument);
+            yp_node_t *result = (yp_node_t *) call;
+
+            // If the receiver of this =~ is a regular expression node, then we
+            // need to introduce local variables for it based on its named
+            // capture groups.
             if (YP_NODE_TYPE_P(node, YP_REGULAR_EXPRESSION_NODE)) {
                 yp_string_list_t named_captures;
                 yp_string_list_init(&named_captures);
 
                 const yp_location_t *content_loc = &((yp_regular_expression_node_t *) node)->content_loc;
+                if (yp_regexp_named_capture_group_names(content_loc->start, (size_t) (content_loc->end - content_loc->start), &named_captures, parser->encoding_changed, &parser->encoding) && (named_captures.length > 0)) {
+                    yp_match_write_node_t *match = yp_match_write_node_create(parser, call);
 
-                if (yp_regexp_named_capture_group_names(content_loc->start, (size_t) (content_loc->end - content_loc->start), &named_captures, parser->encoding_changed, &parser->encoding)) {
                     for (size_t index = 0; index < named_captures.length; index++) {
                         yp_string_t *name = &named_captures.strings[index];
                         assert(name->type == YP_STRING_SHARED);
 
-                        yp_parser_local_add_location(parser, name->source, name->source + name->length);
+                        yp_constant_id_t local = yp_parser_local_add_location(parser, name->source, name->source + name->length);
+                        yp_constant_id_list_append(&match->locals, local);
                     }
+
+                    result = (yp_node_t *) match;
                 }
 
                 yp_string_list_free(&named_captures);
             }
 
-            return (yp_node_t *) yp_call_node_binary_create(parser, node, &token, argument);
+            return result;
         }
         case YP_TOKEN_UAMPERSAND:
         case YP_TOKEN_USTAR:
@@ -13950,7 +14062,6 @@ yp_parser_init(yp_parser_t *parser, const uint8_t *source, size_t size, const ch
 
     *parser = (yp_parser_t) {
         .lex_state = YP_LEX_STATE_BEG,
-        .command_start = true,
         .enclosure_nesting = 0,
         .lambda_enclosure_nesting = -1,
         .brace_nesting = 0,
@@ -13972,19 +14083,22 @@ yp_parser_init(yp_parser_t *parser, const uint8_t *source, size_t size, const ch
         .error_list = YP_LIST_EMPTY,
         .current_scope = NULL,
         .current_context = NULL,
-        .recovering = false,
         .encoding = yp_encoding_utf_8,
-        .encoding_changed = false,
         .encoding_changed_callback = NULL,
         .encoding_decode_callback = NULL,
         .encoding_comment_start = source,
         .lex_callback = NULL,
-        .pattern_matching_newlines = false,
-        .in_keyword_arg = false,
         .filepath_string = filepath_string,
         .constant_pool = YP_CONSTANT_POOL_EMPTY,
         .newline_list = YP_NEWLINE_LIST_EMPTY,
-        .integer_base = 0
+        .integer_base = 0,
+        .command_start = true,
+        .recovering = false,
+        .encoding_changed = false,
+        .pattern_matching_newlines = false,
+        .in_keyword_arg = false,
+        .semantic_token_seen = false,
+        .frozen_string_literal = false
     };
 
     yp_accepts_block_stack_push(parser, true);

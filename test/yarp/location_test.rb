@@ -545,6 +545,10 @@ module YARP
       assert_location(MatchRequiredNode, "foo => bar")
     end
 
+    def test_MatchWriteNode
+      assert_location(MatchWriteNode, "/(?<foo>)/ =~ foo")
+    end
+
     def test_ModuleNode
       assert_location(ModuleNode, "module Foo end")
     end
@@ -556,6 +560,8 @@ module YARP
 
     def test_MultiWriteNode
       assert_location(MultiWriteNode, "foo, bar = baz")
+      assert_location(MultiWriteNode, "(foo, bar) = baz")
+      assert_location(MultiWriteNode, "((foo, bar)) = baz")
     end
 
     def test_NextNode

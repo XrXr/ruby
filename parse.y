@@ -917,6 +917,15 @@ set_embraced_location(NODE *node, const rb_code_location_t *beg, const rb_code_l
     nd_set_line(node, beg->end_pos.lineno);
 }
 
+static NODE *
+last_expr_node(NODE *expr)
+{
+    if (nd_type_p(expr, NODE_BLOCK)) {
+        expr = expr->nd_end->nd_head;
+    }
+    return expr;
+}
+
 #define yyparse ruby_yyparse
 
 static NODE* cond(struct parser_params *p, NODE *node, const YYLTYPE *loc);
@@ -6050,16 +6059,18 @@ singleton	: var_ref
                 | '(' {SET_LEX_STATE(EXPR_BEG);} expr rparen
                     {
                     /*%%%*/
-                        switch (nd_type($3)) {
+                        NODE *expr = last_expr_node($3);
+                        switch (nd_type(expr)) {
                           case NODE_STR:
                           case NODE_DSTR:
                           case NODE_XSTR:
                           case NODE_DXSTR:
                           case NODE_DREGX:
                           case NODE_LIT:
+                          case NODE_DSYM:
                           case NODE_LIST:
                           case NODE_ZLIST:
-                            yyerror1(&@3, "can't define singleton method for literals");
+                            yyerror1(&expr->nd_loc, "can't define singleton method for literals");
                             break;
                           default:
                             value_expr($3);
@@ -10954,6 +10965,16 @@ new_command_qcall(struct parser_params* p, ID atype, NODE *recv, ID mid, NODE *a
 }
 
 #define nd_once_body(node) (nd_type_p((node), NODE_ONCE) ? (node)->nd_body : node)
+
+static NODE*
+last_expr_once_body(NODE *node)
+{
+    if (!node) return 0;
+    node = last_expr_node(node);
+    if (!node) return 0;
+    return nd_once_body(node);
+}
+
 static NODE*
 match_op(struct parser_params *p, NODE *node1, NODE *node2, const YYLTYPE *op_loc, const YYLTYPE *loc)
 {
@@ -10962,7 +10983,8 @@ match_op(struct parser_params *p, NODE *node1, NODE *node2, const YYLTYPE *op_lo
 
     value_expr(node1);
     value_expr(node2);
-    if (node1 && (n = nd_once_body(node1)) != 0) {
+
+    if ((n = last_expr_once_body(node1)) != 0) {
         switch (nd_type(n)) {
           case NODE_DREGX:
             {
@@ -10982,7 +11004,7 @@ match_op(struct parser_params *p, NODE *node1, NODE *node2, const YYLTYPE *op_lo
         }
     }
 
-    if (node2 && (n = nd_once_body(node2)) != 0) {
+    if ((n = last_expr_once_body(node2)) != 0) {
         NODE *match3;
 
         switch (nd_type(n)) {
@@ -12450,6 +12472,10 @@ cond0(struct parser_params *p, NODE *node, enum cond_type type, const YYLTYPE *l
 
         return NEW_MATCH2(node, NEW_GVAR(idLASTLINE, loc), loc);
 
+      case NODE_BLOCK:
+        node->nd_end->nd_head = cond0(p, node->nd_end->nd_head, type, loc);
+        break;
+
       case NODE_AND:
       case NODE_OR:
         node->nd_1st = cond0(p, node->nd_1st, COND_IN_COND, loc);
@@ -13607,23 +13633,8 @@ reg_named_capture_assign_iter(const OnigUChar *name, const OnigUChar *name_end,
     rb_encoding *enc = arg->enc;
     long len = name_end - name;
     const char *s = (const char *)name;
-    ID var;
-    NODE *node, *succ;
 
-    if (!len) return ST_CONTINUE;
-    if (rb_enc_symname_type(s, len, enc, (1U<<ID_LOCAL)) != ID_LOCAL)
-        return ST_CONTINUE;
-
-    var = intern_cstr(s, len, enc);
-    if (len < MAX_WORD_LENGTH && rb_reserved_word(s, (int)len)) {
-        if (!lvar_defined(p, var)) return ST_CONTINUE;
-    }
-    node = node_assign(p, assignable(p, var, 0, arg->loc), NEW_LIT(ID2SYM(var), arg->loc), NO_LEX_CTXT, arg->loc);
-    succ = arg->succ_block;
-    if (!succ) succ = NEW_BEGIN(0, arg->loc);
-    succ = block_append(p, succ, node);
-    arg->succ_block = succ;
-    return ST_CONTINUE;
+    return rb_reg_named_capture_assign_iter_impl(p, s, len, enc, &arg->succ_block, arg->loc);
 }
 
 static NODE *
