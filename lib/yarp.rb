@@ -440,10 +440,6 @@ module YARP
             # arguments. We get rid of that here.
             names = names.grep_v(Integer)
 
-            # TODO: We don't support numbered local variables yet, so we get rid
-            # of those here.
-            names = names.grep_v(/^_\d$/)
-
             # For some reason, CRuby occasionally pushes this special local
             # variable when there are splat arguments. We get rid of that here.
             names = names.grep_v(:"#arg_rest")
@@ -591,11 +587,12 @@ module YARP
 
   class InterpolatedRegularExpressionNode < Node
     # Returns a numeric value that represents the flags that were used to create
-    # the regular expression. This mirrors the Regexp#options method in Ruby.
-    # Note that this is effectively masking only the three common flags that are
-    # used in Ruby, and does not include the full set of flags like encoding.
+    # the regular expression.
     def options
-      flags & 0b111
+      o = flags & 0b111
+      o |= Regexp::FIXEDENCODING if flags.anybits?(RegularExpressionFlags::EUC_JP | RegularExpressionFlags::WINDOWS_31J | RegularExpressionFlags::UTF_8)
+      o |= Regexp::NOENCODING if flags.anybits?(RegularExpressionFlags::ASCII_8BIT)
+      o
     end
   end
 
@@ -608,11 +605,12 @@ module YARP
 
   class RegularExpressionNode < Node
     # Returns a numeric value that represents the flags that were used to create
-    # the regular expression. This mirrors the Regexp#options method in Ruby.
-    # Note that this is effectively masking only the three common flags that are
-    # used in Ruby, and does not include the full set of flags like encoding.
+    # the regular expression.
     def options
-      flags & 0b111
+      o = flags & 0b111
+      o |= Regexp::FIXEDENCODING if flags.anybits?(RegularExpressionFlags::EUC_JP | RegularExpressionFlags::WINDOWS_31J | RegularExpressionFlags::UTF_8)
+      o |= Regexp::NOENCODING if flags.anybits?(RegularExpressionFlags::ASCII_8BIT)
+      o
     end
   end
 end

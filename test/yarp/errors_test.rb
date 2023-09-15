@@ -152,6 +152,13 @@ module YARP
       ]
     end
 
+    def test_incomplete_instance_var_string
+      assert_errors expression('%@#@@#'), '%@#@@#', [
+        ["Incomplete instance variable", 4..5],
+        ["Expected a newline or semicolon after the statement", 4..4]
+      ]
+    end
+
     def test_unterminated_s_symbol
       assert_errors expression("%s[abc"), "%s[abc", [
         ["Expected a closing delimiter for the dynamic symbol", 3..3]
@@ -160,8 +167,15 @@ module YARP
 
     def test_unterminated_parenthesized_expression
       assert_errors expression('(1 + 2'), '(1 + 2', [
+        ["Expected a newline or semicolon after the statement", 6..6],
         ["Cannot parse the expression", 6..6],
         ["Expected a matching `)`", 6..6]
+      ]
+    end
+
+    def test_missing_terminator_in_parentheses
+      assert_error_messages "(0 0)", [
+        "Expected a newline or semicolon after the statement"
       ]
     end
 
@@ -169,6 +183,12 @@ module YARP
       assert_errors expression('a %'), 'a %', [
         ["Invalid `%` token", 2..3],
         ["Expected an expression after the operator", 3..3],
+      ]
+    end
+
+    def test_unterminated_interpolated_symbol
+      assert_error_messages ":\"#", [
+        "Expected a closing delimiter for the interpolated symbol"
       ]
     end
 
@@ -180,6 +200,7 @@ module YARP
 
     def test_1_2_3
       assert_errors expression("(1, 2, 3)"), "(1, 2, 3)", [
+        ["Expected a newline or semicolon after the statement", 2..2],
         ["Cannot parse the expression", 2..2],
         ["Expected a matching `)`", 2..2],
         ["Expected a newline or semicolon after the statement", 2..2],
@@ -187,16 +208,17 @@ module YARP
         ["Expected a newline or semicolon after the statement", 5..5],
         ["Cannot parse the expression", 5..5],
         ["Expected a newline or semicolon after the statement", 8..8],
-        ["Cannot parse the expression", 8..8],
+        ["Cannot parse the expression", 8..8]
       ]
     end
 
     def test_return_1_2_3
       assert_error_messages "return(1, 2, 3)", [
+        "Expected a newline or semicolon after the statement",
         "Cannot parse the expression",
         "Expected a matching `)`",
         "Expected a newline or semicolon after the statement",
-        "Cannot parse the expression",
+        "Cannot parse the expression"
       ]
     end
 
@@ -208,10 +230,11 @@ module YARP
 
     def test_next_1_2_3
       assert_errors expression("next(1, 2, 3)"), "next(1, 2, 3)", [
+        ["Expected a newline or semicolon after the statement", 6..6],
         ["Cannot parse the expression", 6..6],
         ["Expected a matching `)`", 6..6],
         ["Expected a newline or semicolon after the statement", 12..12],
-        ["Cannot parse the expression", 12..12],
+        ["Cannot parse the expression", 12..12]
       ]
     end
 
@@ -223,10 +246,11 @@ module YARP
 
     def test_break_1_2_3
       assert_errors expression("break(1, 2, 3)"), "break(1, 2, 3)", [
+        ["Expected a newline or semicolon after the statement", 7..7],
         ["Cannot parse the expression", 7..7],
         ["Expected a matching `)`", 7..7],
         ["Expected a newline or semicolon after the statement", 13..13],
-        ["Cannot parse the expression", 13..13],
+        ["Cannot parse the expression", 13..13]
       ]
     end
 
@@ -283,7 +307,8 @@ module YARP
 
     def test_def_with_expression_receiver_and_no_identifier
       assert_errors expression("def (a); end"), "def (a); end", [
-        ["Expected a `.` or `::` after the receiver in a method definition", 7..7]
+        ["Expected a `.` or `::` after the receiver in a method definition", 7..7],
+        ["Expected a method name", 7..7]
       ]
     end
 
@@ -291,6 +316,7 @@ module YARP
       assert_errors expression("def (\na\nb\n).c; end"), "def (\na\nb\n).c; end", [
         ["Expected a matching `)`", 7..7],
         ["Expected a `.` or `::` after the receiver in a method definition", 7..7],
+        ["Expected a method name", 7..7],
         ["Cannot parse the expression", 10..10],
         ["Cannot parse the expression", 11..11]
       ]
@@ -1192,11 +1218,62 @@ module YARP
       ]
     end
 
+    def test_writing_numbered_parameter
+      assert_errors expression("-> { _1 = 0 }"), "-> { _1 = 0 }", [
+        ["Token reserved for a numbered parameter", 5..7]
+      ]
+    end
+
+    def test_targeting_numbered_parameter
+      assert_errors expression("-> { _1, = 0 }"), "-> { _1, = 0 }", [
+        ["Token reserved for a numbered parameter", 5..7]
+      ]
+    end
+
+    def test_double_scope_numbered_parameters
+      source = "-> { _1 + -> { _2 } }"
+      errors = [["Numbered parameter is already used in outer scope", 15..17]]
+
+      assert_errors expression(source), source, errors, compare_ripper: false
+    end
+
+    def test_invalid_number_underscores
+      error_messages = ["Invalid underscore placement in number"]
+
+      assert_error_messages "1__1", error_messages
+      assert_error_messages "0b1__1", error_messages
+      assert_error_messages "0o1__1", error_messages
+      assert_error_messages "01__1", error_messages
+      assert_error_messages "0d1__1", error_messages
+      assert_error_messages "0x1__1", error_messages
+
+      assert_error_messages "1_1_", error_messages
+      assert_error_messages "0b1_1_", error_messages
+      assert_error_messages "0o1_1_", error_messages
+      assert_error_messages "01_1_", error_messages
+      assert_error_messages "0d1_1_", error_messages
+      assert_error_messages "0x1_1_", error_messages
+    end
+
+    def test_alnum_delimiters
+      error_messages = ["Invalid `%` token"]
+
+      assert_error_messages "%qXfooX", error_messages
+      assert_error_messages "%QXfooX", error_messages
+      assert_error_messages "%wXfooX", error_messages
+      assert_error_messages "%WxfooX", error_messages
+      assert_error_messages "%iXfooX", error_messages
+      assert_error_messages "%IXfooX", error_messages
+      assert_error_messages "%xXfooX", error_messages
+      assert_error_messages "%rXfooX", error_messages
+      assert_error_messages "%sXfooX", error_messages
+    end
+
     private
 
-    def assert_errors(expected, source, errors)
+    def assert_errors(expected, source, errors, compare_ripper: RUBY_ENGINE == "ruby")
       # Ripper behaves differently on JRuby/TruffleRuby, so only check this on CRuby
-      assert_nil Ripper.sexp_raw(source) if RUBY_ENGINE == "ruby"
+      assert_nil Ripper.sexp_raw(source) if compare_ripper
 
       result = YARP.parse(source)
       node = result.value.statements.body.last

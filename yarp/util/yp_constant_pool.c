@@ -59,10 +59,42 @@ yp_constant_pool_hash(const uint8_t *start, size_t length) {
     return value;
 }
 
+// https://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
+static size_t
+next_power_of_two(size_t v) {
+    // Avoid underflow in subtraction on next line.
+    if (v == 0) {
+        // 1 is the nearest power of 2 to 0 (2^0)
+        return 1;
+    }
+    v--;
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    v |= v >> 8;
+    v |= v >> 16;
+#if defined(__LP64__) || defined(_WIN64)
+    v |= v >> 32;
+#endif
+    v++;
+    return v;
+}
+
+#ifndef NDEBUG
+static bool
+is_power_of_two(size_t size) {
+    return (size & (size - 1)) == 0;
+}
+#endif
+
 // Resize a constant pool to a given capacity.
 static inline bool
 yp_constant_pool_resize(yp_constant_pool_t *pool) {
+    assert(is_power_of_two(pool->capacity));
     size_t next_capacity = pool->capacity * 2;
+    if (next_capacity < pool->capacity) return false;
+
+    const size_t mask = next_capacity - 1;
     yp_constant_t *next_constants = calloc(next_capacity, sizeof(yp_constant_t));
     if (next_constants == NULL) return false;
 
@@ -74,13 +106,13 @@ yp_constant_pool_resize(yp_constant_pool_t *pool) {
         // If an id is set on this constant, then we know we have content here.
         // In this case we need to insert it into the next constant pool.
         if (constant->id != 0) {
-            size_t next_index = constant->hash % next_capacity;
+            size_t next_index = constant->hash & mask;
 
             // This implements linear scanning to find the next available slot
             // in case this index is already taken. We don't need to bother
             // comparing the values since we know that the hash is unique.
             while (next_constants[next_index].id != 0) {
-                next_index = (next_index + 1) % next_capacity;
+                next_index = (next_index + 1) & mask;
             }
 
             // Here we copy over the entire constant, which includes the id so
@@ -98,6 +130,10 @@ yp_constant_pool_resize(yp_constant_pool_t *pool) {
 // Initialize a new constant pool with a given capacity.
 bool
 yp_constant_pool_init(yp_constant_pool_t *pool, size_t capacity) {
+    const size_t size_t_max = (~((size_t) 0));
+    if (capacity >= ((size_t_max / 2) + 1)) return false;
+
+    capacity = next_power_of_two(capacity);
     pool->constants = calloc(capacity, sizeof(yp_constant_t));
     if (pool->constants == NULL) return false;
 
@@ -107,14 +143,16 @@ yp_constant_pool_init(yp_constant_pool_t *pool, size_t capacity) {
 }
 
 // Insert a constant into a constant pool and return its index in the pool.
-static size_t
-yp_constant_pool_insert(yp_constant_pool_t *pool, const uint8_t *start, size_t length) {
+static inline yp_constant_id_t
+yp_constant_pool_insert(yp_constant_pool_t *pool, const uint8_t *start, size_t length, bool owned) {
     if (pool->size >= (pool->capacity / 4 * 3)) {
-        if (!yp_constant_pool_resize(pool)) return pool->capacity;
+        if (!yp_constant_pool_resize(pool)) return 0;
     }
 
+    assert(is_power_of_two(pool->capacity));
+    const size_t mask = pool->capacity - 1;
     size_t hash = yp_constant_pool_hash(start, length);
-    size_t index = hash % pool->capacity;
+    size_t index = hash & mask;
     yp_constant_t *constant;
 
     while (constant = &pool->constants[index], constant->id != 0) {
@@ -122,31 +160,49 @@ yp_constant_pool_insert(yp_constant_pool_t *pool, const uint8_t *start, size_t l
         // same as the content we are trying to insert. If it is, then we can
         // return the id of the existing constant.
         if ((constant->length == length) && memcmp(constant->start, start, length) == 0) {
-            return index;
+            // Since we have found a match, we need to check if this is
+            // attempting to insert a shared or an owned constant. We want to
+            // prefer shared constants since they don't require allocations.
+            if (owned) {
+                // If we're attempting to insert an owned constant and we have
+                // an existing constant, then either way we don't want the given
+                // memory. Either it's duplicated with the existing constant or
+                // it's not necessary because we have a shared version.
+                free((void *) start);
+            } else if (constant->owned) {
+                // If we're attempting to insert a shared constant and the
+                // existing constant is owned, then we can free the owned
+                // constant and replace it with the shared constant.
+                free((void *) constant->start);
+                constant->start = start;
+                constant->owned = false;
+            }
+
+            return constant->id;
         }
 
-        index = (index + 1) % pool->capacity;
+        index = (index + 1) & mask;
     }
 
     pool->size++;
     assert(pool->size < ((size_t) (1 << 31)));
 
-    pool->constants[index] = (yp_constant_t) {
+    *constant = (yp_constant_t) {
         .id = (unsigned int) (pool->size & 0x7FFFFFFF),
+        .owned = owned,
         .start = start,
         .length = length,
         .hash = hash
     };
 
-    return index;
+    return constant->id;
 }
 
 // Insert a constant into a constant pool. Returns the id of the constant, or 0
 // if any potential calls to resize fail.
 yp_constant_id_t
 yp_constant_pool_insert_shared(yp_constant_pool_t *pool, const uint8_t *start, size_t length) {
-    size_t index = yp_constant_pool_insert(pool, start, length);
-    return index == pool->capacity ? 0 : ((yp_constant_id_t) pool->constants[index].id);
+    return yp_constant_pool_insert(pool, start, length, false);
 }
 
 // Insert a constant into a constant pool from memory that is now owned by the
@@ -154,12 +210,7 @@ yp_constant_pool_insert_shared(yp_constant_pool_t *pool, const uint8_t *start, s
 // resize fail.
 yp_constant_id_t
 yp_constant_pool_insert_owned(yp_constant_pool_t *pool, const uint8_t *start, size_t length) {
-    size_t index = yp_constant_pool_insert(pool, start, length);
-    if (index == pool->capacity) return 0;
-
-    yp_constant_t *constant = &pool->constants[index];
-    constant->owned = true;
-    return ((yp_constant_id_t) constant->id);
+    return yp_constant_pool_insert(pool, start, length, true);
 }
 
 // Free the memory associated with a constant pool.
