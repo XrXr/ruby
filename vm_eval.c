@@ -1478,26 +1478,18 @@ rb_iterate0(VALUE (* it_proc) (VALUE), VALUE data1,
       iter_retry:
         {
             VALUE block_handler;
-            struct rb_captured_block code;
 
             if (ifunc) {
-                code = (struct rb_captured_block) {
-                    .self = cfp->self,
-                    .ep = cfp->ep,
-                    .code = {
-                        .ifunc = ifunc,
-                    }
-                };
-                block_handler = VM_BH_FROM_IFUNC_BLOCK(&code);
+                struct rb_captured_block *captured = VM_CFP_TO_CAPTURED_BLOCK(cfp);
+                captured->code.ifunc = ifunc;
+                block_handler = VM_BH_FROM_IFUNC_BLOCK(captured);
             }
             else {
                 block_handler = VM_CF_BLOCK_HANDLER(cfp);
             }
             vm_passed_block_handler_set(ec, block_handler);
-
-            retval = (*it_proc) (data1);
-            RB_GC_GUARD(code.self);
         }
+        retval = (*it_proc) (data1);
     }
     else if (state == TAG_BREAK || state == TAG_RETRY) {
         const struct vm_throw_data *const err = (struct vm_throw_data *)ec->errinfo;
