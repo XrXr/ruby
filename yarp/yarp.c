@@ -549,11 +549,7 @@ typedef struct {
     yp_location_t opening_loc;
     yp_arguments_node_t *arguments;
     yp_location_t closing_loc;
-    yp_block_node_t *block;
-
-    // This boolean is used to tell if there is an implicit block (i.e., an
-    // argument passed with an & operator).
-    bool implicit_block;
+    yp_node_t *block;
 } yp_arguments_t;
 
 #define YP_EMPTY_ARGUMENTS ((yp_arguments_t) {              \
@@ -561,36 +557,37 @@ typedef struct {
     .arguments = NULL,                                      \
     .closing_loc = YP_OPTIONAL_LOCATION_NOT_PROVIDED_VALUE, \
     .block = NULL,                                          \
-    .implicit_block = false                                 \
 })
 
-// Check that the set of arguments parsed for a given node is valid. This means
-// checking that we don't have both an implicit and explicit block.
+// Check that we're not about to attempt to attach a brace block to a call that
+// has arguments without parentheses.
 static void
-yp_arguments_validate(yp_parser_t *parser, yp_arguments_t *arguments) {
-    if (arguments->block != NULL && arguments->implicit_block) {
-        yp_diagnostic_list_append(
-            &parser->error_list,
-            arguments->block->base.location.start,
-            arguments->block->base.location.end,
-            YP_ERR_ARGUMENT_BLOCK_MULTI
-        );
+yp_arguments_validate_block(yp_parser_t *parser, yp_arguments_t *arguments, yp_block_node_t *block) {
+    // First, check that we have arguments and that we don't have a closing
+    // location for them.
+    if (arguments->arguments == NULL || arguments->closing_loc.start != NULL) {
+        return;
     }
 
-    // Brace blocks can't be attached to arguments, only to the call
-    if (arguments->block != NULL &&
-            *arguments->block->opening_loc.start == '{' &&
-            arguments->arguments != NULL &&
-            !(arguments->arguments->arguments.size == 1 &&
-                YP_NODE_TYPE_P(arguments->arguments->arguments.nodes[0], YP_PARENTHESES_NODE)) &&
-            !arguments->closing_loc.end) {
-        yp_diagnostic_list_append(
-            &parser->error_list,
-            arguments->block->base.location.start,
-            arguments->block->base.location.end,
-            YP_ERR_ARGUMENT_BLOCK_MULTI
-        );
+    // Next, check that we don't have a single parentheses argument. This would
+    // look like:
+    //
+    //     foo (1) {}
+    //
+    // In this case, it's actually okay for the block to be attached to the
+    // call, even though it looks like it's attached to the argument.
+    if (arguments->arguments->arguments.size == 1 && YP_NODE_TYPE_P(arguments->arguments->arguments.nodes[0], YP_PARENTHESES_NODE)) {
+        return;
     }
+
+    // If we didn't hit a case before this check, then at this point we need to
+    // add a syntax error.
+    yp_diagnostic_list_append(
+        &parser->error_list,
+        block->base.location.start,
+        block->base.location.end,
+        YP_ERR_ARGUMENT_UNEXPECTED_BLOCK
+    );
 }
 
 /******************************************************************************/
@@ -1340,7 +1337,7 @@ yp_call_node_aref_create(yp_parser_t *parser, yp_node_t *receiver, yp_arguments_
 
     node->base.location.start = receiver->location.start;
     if (arguments->block != NULL) {
-        node->base.location.end = arguments->block->base.location.end;
+        node->base.location.end = arguments->block->location.end;
     } else {
         node->base.location.end = arguments->closing_loc.end;
     }
@@ -1384,7 +1381,7 @@ yp_call_node_call_create(yp_parser_t *parser, yp_node_t *receiver, yp_token_t *o
 
     node->base.location.start = receiver->location.start;
     if (arguments->block != NULL) {
-        node->base.location.end = arguments->block->base.location.end;
+        node->base.location.end = arguments->block->location.end;
     } else if (arguments->closing_loc.start != NULL) {
         node->base.location.end = arguments->closing_loc.end;
     } else if (arguments->arguments != NULL) {
@@ -1417,7 +1414,7 @@ yp_call_node_fcall_create(yp_parser_t *parser, yp_token_t *message, yp_arguments
 
     node->base.location.start = message->start;
     if (arguments->block != NULL) {
-        node->base.location.end = arguments->block->base.location.end;
+        node->base.location.end = arguments->block->location.end;
     } else if (arguments->closing_loc.start != NULL) {
         node->base.location.end = arguments->closing_loc.end;
     } else if (arguments->arguments != NULL) {
@@ -1465,7 +1462,7 @@ yp_call_node_shorthand_create(yp_parser_t *parser, yp_node_t *receiver, yp_token
 
     node->base.location.start = receiver->location.start;
     if (arguments->block != NULL) {
-        node->base.location.end = arguments->block->base.location.end;
+        node->base.location.end = arguments->block->location.end;
     } else {
         node->base.location.end = arguments->closing_loc.end;
     }
@@ -2414,18 +2411,24 @@ yp_forwarding_parameter_node_create(yp_parser_t *parser, const yp_token_t *token
 // Allocate and initialize a new ForwardingSuper node.
 static yp_forwarding_super_node_t *
 yp_forwarding_super_node_create(yp_parser_t *parser, const yp_token_t *token, yp_arguments_t *arguments) {
+    assert(arguments->block == NULL || YP_NODE_TYPE_P(arguments->block, YP_BLOCK_NODE));
     assert(token->type == YP_TOKEN_KEYWORD_SUPER);
     yp_forwarding_super_node_t *node = YP_ALLOC_NODE(parser, yp_forwarding_super_node_t);
+
+    yp_block_node_t *block = NULL;
+    if (arguments->block != NULL) {
+        block = (yp_block_node_t *) arguments->block;
+    }
 
     *node = (yp_forwarding_super_node_t) {
         {
             .type = YP_FORWARDING_SUPER_NODE,
             .location = {
                 .start = token->start,
-                .end = arguments->block != NULL ? arguments->block->base.location.end : token->end
+                .end = block != NULL ? block->base.location.end : token->end
             },
         },
-        .block = arguments->block
+        .block = block
     };
 
     return node;
@@ -4282,7 +4285,7 @@ yp_super_node_create(yp_parser_t *parser, const yp_token_t *keyword, yp_argument
 
     const uint8_t *end;
     if (arguments->block != NULL) {
-        end = arguments->block->base.location.end;
+        end = arguments->block->location.end;
     } else if (arguments->closing_loc.start != NULL) {
         end = arguments->closing_loc.end;
     } else if (arguments->arguments != NULL) {
@@ -8467,6 +8470,7 @@ parse_target(yp_parser_t *parser, yp_node_t *target) {
             // expression.
             if (
                 (call->call_operator_loc.start == NULL) &&
+                (call->message_loc.start != NULL) &&
                 (call->message_loc.start[0] == '[') &&
                 (call->message_loc.end[-1] == ']') &&
                 (call->block == NULL)
@@ -8485,6 +8489,20 @@ parse_target(yp_parser_t *parser, yp_node_t *target) {
             yp_diagnostic_list_append(&parser->error_list, target->location.start, target->location.end, YP_ERR_WRITE_TARGET_UNEXPECTED);
             return target;
     }
+}
+
+// Parse a write targets and validate that it is in a valid position for
+// assignment.
+static yp_node_t *
+parse_target_validate(yp_parser_t *parser, yp_node_t *target) {
+    yp_node_t *result = parse_target(parser, target);
+
+    // Ensure that we have either an = or a ) after the targets.
+    if (!match3(parser, YP_TOKEN_EQUAL, YP_TOKEN_PARENTHESIS_RIGHT, YP_TOKEN_KEYWORD_IN)) {
+        yp_diagnostic_list_append(&parser->error_list, result->location.start, result->location.end, YP_ERR_WRITE_TARGET_UNEXPECTED);
+    }
+
+    return result;
 }
 
 // Convert the given node into a valid write node.
@@ -8658,12 +8676,10 @@ parse_write(yp_parser_t *parser, yp_node_t *target, yp_token_t *operator, yp_nod
 // target node or a multi-target node.
 static yp_node_t *
 parse_targets(yp_parser_t *parser, yp_node_t *first_target, yp_binding_power_t binding_power) {
-    first_target = parse_target(parser, first_target);
-    if (!match1(parser, YP_TOKEN_COMMA)) return first_target;
+    bool has_splat = YP_NODE_TYPE_P(first_target, YP_SPLAT_NODE);
 
     yp_multi_target_node_t *result = yp_multi_target_node_create(parser);
-    yp_multi_target_node_targets_append(result, first_target);
-    bool has_splat = YP_NODE_TYPE_P(first_target, YP_SPLAT_NODE);
+    yp_multi_target_node_targets_append(result, parse_target(parser, first_target));
 
     while (accept1(parser, YP_TOKEN_COMMA)) {
         if (accept1(parser, YP_TOKEN_USTAR)) {
@@ -8701,6 +8717,20 @@ parse_targets(yp_parser_t *parser, yp_node_t *first_target, yp_binding_power_t b
     }
 
     return (yp_node_t *) result;
+}
+
+// Parse a list of targets and validate that it is in a valid position for
+// assignment.
+static yp_node_t *
+parse_targets_validate(yp_parser_t *parser, yp_node_t *first_target, yp_binding_power_t binding_power) {
+    yp_node_t *result = parse_targets(parser, first_target, binding_power);
+
+    // Ensure that we have either an = or a ) after the targets.
+    if (!match2(parser, YP_TOKEN_EQUAL, YP_TOKEN_PARENTHESIS_RIGHT)) {
+        yp_diagnostic_list_append(&parser->error_list, result->location.start, result->location.end, YP_ERR_WRITE_TARGET_UNEXPECTED);
+    }
+
+    return result;
 }
 
 // Parse a list of statements separated by newlines or semicolons.
@@ -8867,6 +8897,16 @@ parse_assocs(yp_parser_t *parser, yp_node_t *node) {
     }
 }
 
+// Append an argument to a list of arguments.
+static inline void
+parse_arguments_append(yp_parser_t *parser, yp_arguments_t *arguments, yp_node_t *argument) {
+    if (arguments->arguments == NULL) {
+        arguments->arguments = yp_arguments_node_create(parser);
+    }
+
+    yp_arguments_node_arguments_append(arguments->arguments, argument);
+}
+
 // Parse a list of arguments.
 static void
 parse_arguments(yp_parser_t *parser, yp_arguments_t *arguments, bool accepts_forwarding, yp_token_type_t terminator) {
@@ -8900,13 +8940,14 @@ parse_arguments(yp_parser_t *parser, yp_arguments_t *arguments, bool accepts_for
                 }
 
                 yp_keyword_hash_node_t *hash = yp_keyword_hash_node_create(parser);
-                argument = (yp_node_t *)hash;
+                argument = (yp_node_t *) hash;
 
                 if (!match7(parser, terminator, YP_TOKEN_NEWLINE, YP_TOKEN_SEMICOLON, YP_TOKEN_EOF, YP_TOKEN_BRACE_RIGHT, YP_TOKEN_KEYWORD_DO, YP_TOKEN_PARENTHESIS_RIGHT)) {
                     parse_assocs(parser, (yp_node_t *) hash);
                 }
 
                 parsed_bare_hash = true;
+                parse_arguments_append(parser, arguments, argument);
                 break;
             }
             case YP_TOKEN_UAMPERSAND: {
@@ -8920,9 +8961,14 @@ parse_arguments(yp_parser_t *parser, yp_arguments_t *arguments, bool accepts_for
                     yp_diagnostic_list_append(&parser->error_list, operator.start, operator.end, YP_ERR_ARGUMENT_NO_FORWARDING_AMP);
                 }
 
-                argument = (yp_node_t *)yp_block_argument_node_create(parser, &operator, expression);
+                argument = (yp_node_t *) yp_block_argument_node_create(parser, &operator, expression);
+                if (parsed_block_argument) {
+                    parse_arguments_append(parser, arguments, argument);
+                } else {
+                    arguments->block = argument;
+                }
+
                 parsed_block_argument = true;
-                arguments->implicit_block = true;
                 break;
             }
             case YP_TOKEN_USTAR: {
@@ -8945,6 +8991,7 @@ parse_arguments(yp_parser_t *parser, yp_arguments_t *arguments, bool accepts_for
                     argument = (yp_node_t *) yp_splat_node_create(parser, &operator, expression);
                 }
 
+                parse_arguments_append(parser, arguments, argument);
                 break;
             }
             case YP_TOKEN_UDOT_DOT_DOT: {
@@ -8962,7 +9009,8 @@ parse_arguments(yp_parser_t *parser, yp_arguments_t *arguments, bool accepts_for
                             yp_diagnostic_list_append(&parser->error_list, parser->previous.start, parser->previous.end, YP_ERR_ARGUMENT_NO_FORWARDING_ELLIPSES);
                         }
 
-                        argument = (yp_node_t *)yp_forwarding_arguments_node_create(parser, &parser->previous);
+                        argument = (yp_node_t *) yp_forwarding_arguments_node_create(parser, &parser->previous);
+                        parse_arguments_append(parser, arguments, argument);
                         break;
                     }
                 }
@@ -9005,11 +9053,10 @@ parse_arguments(yp_parser_t *parser, yp_arguments_t *arguments, bool accepts_for
                     parsed_bare_hash = true;
                 }
 
+                parse_arguments_append(parser, arguments, argument);
                 break;
             }
         }
-
-        yp_arguments_node_arguments_append(arguments->arguments, argument);
 
         // If parsing the argument failed, we need to stop parsing arguments.
         if (YP_NODE_TYPE_P(argument, YP_MISSING_NODE) || parser->recovering) break;
@@ -9710,8 +9757,6 @@ parse_arguments_list(yp_parser_t *parser, yp_arguments_t *arguments, bool accept
         if (accept1(parser, YP_TOKEN_PARENTHESIS_RIGHT)) {
             arguments->closing_loc = YP_LOCATION_TOKEN_VALUE(&parser->previous);
         } else {
-            arguments->arguments = yp_arguments_node_create(parser);
-
             yp_accepts_block_stack_push(parser, true);
             parse_arguments(parser, arguments, true, YP_TOKEN_PARENTHESIS_RIGHT);
             expect1(parser, YP_TOKEN_PARENTHESIS_RIGHT, YP_ERR_ARGUMENT_TERM_PAREN);
@@ -9726,7 +9771,6 @@ parse_arguments_list(yp_parser_t *parser, yp_arguments_t *arguments, bool accept
         // If we get here, then the subsequent token cannot be used as an infix
         // operator. In this case we assume the subsequent token is part of an
         // argument to this method call.
-        arguments->arguments = yp_arguments_node_create(parser);
         parse_arguments(parser, arguments, true, YP_TOKEN_EOF);
 
         yp_accepts_block_stack_pop(parser);
@@ -9736,16 +9780,28 @@ parse_arguments_list(yp_parser_t *parser, yp_arguments_t *arguments, bool accept
     // node that starts with a {. If there is, then we can parse it and add it to
     // the arguments.
     if (accepts_block) {
+        yp_block_node_t *block = NULL;
+
         if (accept1(parser, YP_TOKEN_BRACE_LEFT)) {
             found |= true;
-            arguments->block = parse_block(parser);
+            block = parse_block(parser);
+            yp_arguments_validate_block(parser, arguments, block);
         } else if (yp_accepts_block_stack_p(parser) && accept1(parser, YP_TOKEN_KEYWORD_DO)) {
             found |= true;
-            arguments->block = parse_block(parser);
+            block = parse_block(parser);
+        }
+
+        if (block != NULL) {
+            if (arguments->block == NULL) {
+                arguments->block = (yp_node_t *) block;
+            } else {
+                yp_diagnostic_list_append(&parser->error_list, block->base.location.start, block->base.location.end, YP_ERR_ARGUMENT_BLOCK_MULTI);
+                yp_arguments_node_arguments_append(arguments->arguments, arguments->block);
+                arguments->block = (yp_node_t *) block;
+            }
         }
     }
 
-    yp_arguments_validate(parser, arguments);
     return found;
 }
 
@@ -11450,7 +11506,11 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
                     multi_target->base.location.start = lparen_loc.start;
                     multi_target->base.location.end = rparen_loc.end;
 
-                    return parse_targets(parser, (yp_node_t *) multi_target, YP_BINDING_POWER_INDEX);
+                    if (match1(parser, YP_TOKEN_COMMA)) {
+                        return parse_targets_validate(parser, (yp_node_t *) multi_target, YP_BINDING_POWER_INDEX);
+                    } else {
+                        return parse_target_validate(parser, (yp_node_t *) multi_target);
+                    }
                 }
 
                 // If we have a single statement and are ending on a right parenthesis
@@ -11555,7 +11615,7 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
             yp_node_t *node = (yp_node_t *) yp_class_variable_read_node_create(parser, &parser->previous);
 
             if (binding_power == YP_BINDING_POWER_STATEMENT && match1(parser, YP_TOKEN_COMMA)) {
-                node = parse_targets(parser, node, YP_BINDING_POWER_INDEX);
+                node = parse_targets_validate(parser, node, YP_BINDING_POWER_INDEX);
             }
 
             return node;
@@ -11581,7 +11641,7 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
             if ((binding_power == YP_BINDING_POWER_STATEMENT) && match1(parser, YP_TOKEN_COMMA)) {
                 // If we get here, then we have a comma immediately following a
                 // constant, so we're going to parse this as a multiple assignment.
-                node = parse_targets(parser, node, YP_BINDING_POWER_INDEX);
+                node = parse_targets_validate(parser, node, YP_BINDING_POWER_INDEX);
             }
 
             return node;
@@ -11596,7 +11656,7 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
             yp_node_t *node = (yp_node_t *)yp_constant_path_node_create(parser, NULL, &delimiter, constant);
 
             if ((binding_power == YP_BINDING_POWER_STATEMENT) && match1(parser, YP_TOKEN_COMMA)) {
-                node = parse_targets(parser, node, YP_BINDING_POWER_INDEX);
+                node = parse_targets_validate(parser, node, YP_BINDING_POWER_INDEX);
             }
 
             return node;
@@ -11626,7 +11686,7 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
             yp_node_t *node = (yp_node_t *) yp_numbered_reference_read_node_create(parser, &parser->previous);
 
             if (binding_power == YP_BINDING_POWER_STATEMENT && match1(parser, YP_TOKEN_COMMA)) {
-                node = parse_targets(parser, node, YP_BINDING_POWER_INDEX);
+                node = parse_targets_validate(parser, node, YP_BINDING_POWER_INDEX);
             }
 
             return node;
@@ -11636,7 +11696,7 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
             yp_node_t *node = (yp_node_t *) yp_global_variable_read_node_create(parser, &parser->previous);
 
             if (binding_power == YP_BINDING_POWER_STATEMENT && match1(parser, YP_TOKEN_COMMA)) {
-                node = parse_targets(parser, node, YP_BINDING_POWER_INDEX);
+                node = parse_targets_validate(parser, node, YP_BINDING_POWER_INDEX);
             }
 
             return node;
@@ -11646,7 +11706,7 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
             yp_node_t *node = (yp_node_t *) yp_back_reference_read_node_create(parser, &parser->previous);
 
             if (binding_power == YP_BINDING_POWER_STATEMENT && match1(parser, YP_TOKEN_COMMA)) {
-                node = parse_targets(parser, node, YP_BINDING_POWER_INDEX);
+                node = parse_targets_validate(parser, node, YP_BINDING_POWER_INDEX);
             }
 
             return node;
@@ -11675,7 +11735,7 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
                     call->block = arguments.block;
 
                     if (arguments.block != NULL) {
-                        call->base.location.end = arguments.block->base.location.end;
+                        call->base.location.end = arguments.block->location.end;
                     } else if (arguments.closing_loc.start == NULL) {
                         if (arguments.arguments != NULL) {
                             call->base.location.end = arguments.arguments->base.location.end;
@@ -11704,7 +11764,7 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
             }
 
             if ((binding_power == YP_BINDING_POWER_STATEMENT) && match1(parser, YP_TOKEN_COMMA)) {
-                node = parse_targets(parser, node, YP_BINDING_POWER_INDEX);
+                node = parse_targets_validate(parser, node, YP_BINDING_POWER_INDEX);
             }
 
             return node;
@@ -11821,7 +11881,7 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
             yp_node_t *node = (yp_node_t *) yp_instance_variable_read_node_create(parser, &parser->previous);
 
             if (binding_power == YP_BINDING_POWER_STATEMENT && match1(parser, YP_TOKEN_COMMA)) {
-                node = parse_targets(parser, node, YP_BINDING_POWER_INDEX);
+                node = parse_targets_validate(parser, node, YP_BINDING_POWER_INDEX);
             }
 
             return node;
@@ -11905,6 +11965,7 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
             }
 
             if (accept1(parser, YP_TOKEN_KEYWORD_END)) {
+                yp_diagnostic_list_append(&parser->error_list, case_keyword.start, case_keyword.end, YP_ERR_CASE_MISSING_CONDITIONS);
                 return (yp_node_t *) yp_case_node_create(parser, &case_keyword, predicate, NULL, &parser->previous);
             }
 
@@ -12011,12 +12072,14 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
                 }
             }
 
+            // If we didn't parse any conditions (in or when) then we need to
+            // indicate that we have an error.
+            if (case_node->conditions.size == 0) {
+                yp_diagnostic_list_append(&parser->error_list, case_keyword.start, case_keyword.end, YP_ERR_CASE_MISSING_CONDITIONS);
+            }
+
             accept2(parser, YP_TOKEN_NEWLINE, YP_TOKEN_SEMICOLON);
             if (accept1(parser, YP_TOKEN_KEYWORD_ELSE)) {
-                if (case_node->conditions.size < 1) {
-                    yp_diagnostic_list_append(&parser->error_list, parser->previous.start, parser->previous.end, YP_ERR_CASE_LONELY_ELSE);
-                }
-
                 yp_token_t else_keyword = parser->previous;
                 yp_else_node_t *else_node;
 
@@ -12091,7 +12154,6 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
                 yp_binding_power_t binding_power = yp_binding_powers[parser->current.type].left;
 
                 if (binding_power == YP_BINDING_POWER_UNSET || binding_power >= YP_BINDING_POWER_RANGE) {
-                    arguments.arguments = yp_arguments_node_create(parser);
                     parse_arguments(parser, &arguments, false, YP_TOKEN_EOF);
                 }
             }
@@ -12522,7 +12584,6 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
 
                 if (token_begins_expression_p(parser->current.type)) {
                     name = parse_expression(parser, YP_BINDING_POWER_INDEX, YP_ERR_EXPECT_EXPRESSION_AFTER_STAR);
-                    name = parse_target(parser, name);
                 }
 
                 index = (yp_node_t *) yp_splat_node_create(parser, &star_operator, name);
@@ -12534,7 +12595,11 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
             }
 
             // Now, if there are multiple index expressions, parse them out.
-            index = parse_targets(parser, index, YP_BINDING_POWER_INDEX);
+            if (match1(parser, YP_TOKEN_COMMA)) {
+                index = parse_targets(parser, index, YP_BINDING_POWER_INDEX);
+            } else {
+                index = parse_target(parser, index);
+            }
 
             yp_do_loop_stack_push(parser, true);
 
@@ -12922,7 +12987,7 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
 
                 yp_token_t opening = not_provided(parser);
                 yp_token_t closing = not_provided(parser);
-                yp_node_t *string = (yp_node_t *) yp_string_node_create_and_unescape(parser, &opening, &parser->previous, &closing, YP_UNESCAPE_MINIMAL);
+                yp_node_t *string = (yp_node_t *) yp_string_node_create_and_unescape(parser, &opening, &parser->previous, &closing, YP_UNESCAPE_WHITESPACE);
                 yp_array_node_elements_append(array, string);
             }
 
@@ -13189,8 +13254,8 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
             parser_lex(parser);
 
             // * operators at the beginning of expressions are only valid in the
-            // context of a multiple assignment. We enforce that here. We'll still lex
-            // past it though and create a missing node place.
+            // context of a multiple assignment. We enforce that here. We'll
+            // still lex past it though and create a missing node place.
             if (binding_power != YP_BINDING_POWER_STATEMENT) {
                 return (yp_node_t *) yp_missing_node_create(parser, parser->previous.start, parser->previous.end);
             }
@@ -13203,7 +13268,12 @@ parse_expression_prefix(yp_parser_t *parser, yp_binding_power_t binding_power) {
             }
 
             yp_node_t *splat = (yp_node_t *) yp_splat_node_create(parser, &operator, name);
-            return parse_targets(parser, splat, YP_BINDING_POWER_INDEX);
+
+            if (match1(parser, YP_TOKEN_COMMA)) {
+                return parse_targets_validate(parser, splat, YP_BINDING_POWER_INDEX);
+            } else {
+                return parse_target_validate(parser, splat);
+            }
         }
         case YP_TOKEN_BANG: {
             parser_lex(parser);
@@ -13884,7 +13954,7 @@ parse_expression_infix(yp_parser_t *parser, yp_node_t *node, yp_binding_power_t 
                 arguments.opening_loc.start == NULL &&
                 match1(parser, YP_TOKEN_COMMA)
             ) {
-                return parse_targets(parser, (yp_node_t *) call, YP_BINDING_POWER_INDEX);
+                return parse_targets_validate(parser, (yp_node_t *) call, YP_BINDING_POWER_INDEX);
             } else {
                 return (yp_node_t *) call;
             }
@@ -13987,7 +14057,7 @@ parse_expression_infix(yp_parser_t *parser, yp_node_t *node, yp_binding_power_t 
 
                     // If this is followed by a comma then it is a multiple assignment.
                     if (previous_binding_power == YP_BINDING_POWER_STATEMENT && match1(parser, YP_TOKEN_COMMA)) {
-                        return parse_targets(parser, path, YP_BINDING_POWER_INDEX);
+                        return parse_targets_validate(parser, path, YP_BINDING_POWER_INDEX);
                     }
 
                     return path;
@@ -14006,7 +14076,7 @@ parse_expression_infix(yp_parser_t *parser, yp_node_t *node, yp_binding_power_t 
 
                     // If this is followed by a comma then it is a multiple assignment.
                     if (previous_binding_power == YP_BINDING_POWER_STATEMENT && match1(parser, YP_TOKEN_COMMA)) {
-                        return parse_targets(parser, (yp_node_t *) call, YP_BINDING_POWER_INDEX);
+                        return parse_targets_validate(parser, (yp_node_t *) call, YP_BINDING_POWER_INDEX);
                     }
 
                     return (yp_node_t *) call;
@@ -14041,11 +14111,8 @@ parse_expression_infix(yp_parser_t *parser, yp_node_t *node, yp_binding_power_t 
 
             if (!accept1(parser, YP_TOKEN_BRACKET_RIGHT)) {
                 yp_accepts_block_stack_push(parser, true);
-                arguments.arguments = yp_arguments_node_create(parser);
-
                 parse_arguments(parser, &arguments, false, YP_TOKEN_BRACKET_RIGHT);
                 yp_accepts_block_stack_pop(parser);
-
                 expect1(parser, YP_TOKEN_BRACKET_RIGHT, YP_ERR_EXPECT_RBRACKET);
             }
 
@@ -14055,19 +14122,29 @@ parse_expression_infix(yp_parser_t *parser, yp_node_t *node, yp_binding_power_t 
             // assignment and we should parse the targets.
             if (previous_binding_power == YP_BINDING_POWER_STATEMENT && match1(parser, YP_TOKEN_COMMA)) {
                 yp_call_node_t *aref = yp_call_node_aref_create(parser, node, &arguments);
-                return parse_targets(parser, (yp_node_t *) aref, YP_BINDING_POWER_INDEX);
+                return parse_targets_validate(parser, (yp_node_t *) aref, YP_BINDING_POWER_INDEX);
             }
 
             // If we're at the end of the arguments, we can now check if there is a
             // block node that starts with a {. If there is, then we can parse it and
             // add it to the arguments.
+            yp_block_node_t *block = NULL;
             if (accept1(parser, YP_TOKEN_BRACE_LEFT)) {
-                arguments.block = parse_block(parser);
+                block = parse_block(parser);
+                yp_arguments_validate_block(parser, &arguments, block);
             } else if (yp_accepts_block_stack_p(parser) && accept1(parser, YP_TOKEN_KEYWORD_DO)) {
-                arguments.block = parse_block(parser);
+                block = parse_block(parser);
             }
 
-            yp_arguments_validate(parser, &arguments);
+            if (block != NULL) {
+                if (arguments.block != NULL) {
+                    yp_diagnostic_list_append(&parser->error_list, block->base.location.start, block->base.location.end, YP_ERR_ARGUMENT_AFTER_BLOCK);
+                    yp_arguments_node_arguments_append(arguments.arguments, arguments.block);
+                }
+
+                arguments.block = (yp_node_t *) block;
+            }
+
             return (yp_node_t *) yp_call_node_aref_create(parser, node, &arguments);
         }
         case YP_TOKEN_KEYWORD_IN: {
@@ -14304,7 +14381,7 @@ yp_parser_init(yp_parser_t *parser, const uint8_t *source, size_t size, const ch
     //
     // This ratio will need to change if we add more constants to the constant
     // pool for another node type.
-    size_t constant_size = size / 95;
+    uint32_t constant_size = ((uint32_t) size) / 95;
     yp_constant_pool_init(&parser->constant_pool, constant_size < 4 ? 4 : constant_size);
 
     // Initialize the newline list. Similar to the constant pool, we're going to
@@ -14395,6 +14472,7 @@ yp_serialize(yp_parser_t *parser, yp_node_t *node, yp_buffer_t *buffer) {
     yp_buffer_append_u8(buffer, YP_VERSION_MAJOR);
     yp_buffer_append_u8(buffer, YP_VERSION_MINOR);
     yp_buffer_append_u8(buffer, YP_VERSION_PATCH);
+    yp_buffer_append_u8(buffer, YP_SERIALIZE_ONLY_SEMANTICS_FIELDS ? 1 : 0);
 
     yp_serialize_content(parser, node, buffer);
     yp_buffer_append_str(buffer, "\0", 1);

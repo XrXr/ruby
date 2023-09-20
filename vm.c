@@ -3669,6 +3669,7 @@ Init_VM(void)
 {
     VALUE opts;
     VALUE klass;
+    VALUE fcore;
 
     /*
      * Document-class: RubyVM
@@ -3694,8 +3695,9 @@ Init_VM(void)
 #endif
 
     /* FrozenCore (hidden) */
-    VALUE fcore = rb_mRubyVMFrozenCore = rb_iclass_alloc(rb_cBasicObject);
+    fcore = rb_class_new(rb_cBasicObject);
     rb_set_class_path(fcore, rb_cRubyVM, "FrozenCore");
+    RBASIC(fcore)->flags = T_ICLASS;
     klass = rb_singleton_class(fcore);
     rb_define_method_id(klass, id_core_set_method_alias, m_core_set_method_alias, 3);
     rb_define_method_id(klass, id_core_set_variable_alias, m_core_set_variable_alias, 2);
@@ -3714,6 +3716,8 @@ Init_VM(void)
     RBASIC_CLEAR_CLASS(klass);
     rb_obj_freeze(klass);
     rb_gc_register_mark_object(fcore);
+    rb_gc_register_mark_object(rb_class_path_cached(fcore));
+    rb_mRubyVMFrozenCore = fcore;
 
     /*
      * Document-class: Thread

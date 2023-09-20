@@ -364,12 +364,9 @@ module YARP
         nil,
         Location(),
         Location(),
-        ArgumentsNode([
-          BlockArgumentNode(expression("block"), Location()),
-          expression("foo")
-        ]),
+        ArgumentsNode([expression("foo")]),
         Location(),
-        nil,
+        BlockArgumentNode(expression("block"), Location()),
         0,
         "a"
       )
@@ -949,7 +946,21 @@ module YARP
       )
 
       assert_errors expected, "case :a\nelse\nend", [
-        ["Unexpected `else` in `case` statement; a `when` clause must precede `else`", 8..12]
+        ["Expected a `when` or `in` clause after `case`", 0..4]
+      ]
+    end
+
+    def test_case_without_clauses
+      expected = CaseNode(
+        SymbolNode(Location(), Location(), nil, "a"),
+        [],
+        nil,
+        Location(),
+        Location()
+      )
+
+      assert_errors expected, "case :a\nend", [
+        ["Expected a `when` or `in` clause after `case`", 0..4]
       ]
     end
 
@@ -1190,8 +1201,30 @@ module YARP
 
     def test_invalid_global_variable_write
       assert_errors expression("$',"), "$',", [
-        ["Immutable variable as a write target", 0..2]
+        ["Immutable variable as a write target", 0..2],
+        ["Unexpected write target", 0..3]
       ]
+    end
+
+    def test_invalid_multi_target
+      error_messages = ["Unexpected write target"]
+      immutable = "Immutable variable as a write target"
+
+      assert_error_messages "foo,", error_messages
+      assert_error_messages "foo = 1; foo,", error_messages
+      assert_error_messages "foo.bar,", error_messages
+      assert_error_messages "*foo,", error_messages
+      assert_error_messages "@foo,", error_messages
+      assert_error_messages "@@foo,", error_messages
+      assert_error_messages "$foo,", error_messages
+      assert_error_messages "$1,", [immutable, *error_messages]
+      assert_error_messages "$+,", [immutable, *error_messages]
+      assert_error_messages "Foo,", error_messages
+      assert_error_messages "::Foo,", error_messages
+      assert_error_messages "Foo::Foo,", error_messages
+      assert_error_messages "Foo::foo,", error_messages
+      assert_error_messages "foo[foo],", error_messages
+      assert_error_messages "(foo, bar)", error_messages
     end
 
     def test_call_with_block_and_write
@@ -1282,8 +1315,8 @@ module YARP
       assert_equal(errors, result.errors.map { |e| [e.message, e.location.start_offset..e.location.end_offset] })
     end
 
-    def assert_error_messages(source, errors)
-      assert_nil Ripper.sexp_raw(source)
+    def assert_error_messages(source, errors, compare_ripper: RUBY_ENGINE == "ruby")
+      assert_nil Ripper.sexp_raw(source) if compare_ripper
       result = YARP.parse(source)
       assert_equal(errors, result.errors.map(&:message))
     end

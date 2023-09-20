@@ -141,39 +141,38 @@ yp_optimizable_range_item_p(yp_node_t *node)
     return (!node || YP_NODE_TYPE_P(node, YP_INTEGER_NODE) || YP_NODE_TYPE_P(node, YP_NIL_NODE));
 }
 
-static bool
-yp_static_node_literal_p(yp_node_t *node)
-{
-    switch (YP_NODE_TYPE(node)) {
-      case YP_FALSE_NODE:
-      case YP_FLOAT_NODE:
-      case YP_IMAGINARY_NODE:
-      case YP_INTEGER_NODE:
-      case YP_NIL_NODE:
-      case YP_RATIONAL_NODE:
-      case YP_SELF_NODE:
-      case YP_STRING_NODE:
-      case YP_SOURCE_ENCODING_NODE:
-      case YP_SOURCE_FILE_NODE:
-      case YP_SOURCE_LINE_NODE:
-      case YP_SYMBOL_NODE:
-      case YP_TRUE_NODE:
-        return true;
-      default:
-        return false;
-    }
+/**
+ * Certain nodes can be compiled literally, which can lead to further
+ * optimizations. These nodes will all have the YP_NODE_FLAG_STATIC_LITERAL flag
+ * set.
+ */
+static inline bool
+yp_static_node_literal_p(yp_node_t *node) {
+    return node->flags & YP_NODE_FLAG_STATIC_LITERAL;
 }
 
 static inline VALUE
 yp_static_literal_value(yp_node_t *node)
 {
-    switch (YP_NODE_TYPE(node)) {
-      case YP_NIL_NODE:
-        return Qnil;
-      case YP_TRUE_NODE:
-        return Qtrue;
+    switch(YP_NODE_TYPE(node)) {
       case YP_FALSE_NODE:
         return Qfalse;
+      case YP_FLOAT_NODE:
+        return parse_float(node);
+      case YP_IMAGINARY_NODE:
+        return parse_imaginary((yp_imaginary_node_t *)node);
+      case YP_INTEGER_NODE:
+        return parse_integer(node);
+      case YP_NIL_NODE:
+        return Qnil;
+      case YP_RATIONAL_NODE:
+        return parse_rational(node);
+      case YP_STRING_NODE:
+        return parse_string(&((yp_string_node_t *)node)->unescaped);
+      case YP_SYMBOL_NODE:
+        return ID2SYM(parse_string_symbol(&((yp_symbol_node_t *)node)->unescaped));
+      case YP_TRUE_NODE:
+        return Qtrue;
         // TODO: Implement this method for the other literal nodes described above
       default:
         rb_raise(rb_eArgError, "Don't have a literal value for this type");
@@ -296,6 +295,9 @@ yp_compile_if(rb_iseq_t *iseq, const int line, yp_statements_node_t *node_body, 
         INIT_ANCHOR(then_seq);
         if (node_body) {
             yp_compile_node(iseq, (yp_node_t *)node_body, then_seq, src, popped, compile_context);
+            if (popped) {
+                ADD_INSN(ret, &line_node, pop);
+            }
         }
         else {
             if (!popped) {
@@ -334,9 +336,6 @@ yp_compile_if(rb_iseq_t *iseq, const int line, yp_statements_node_t *node_body, 
         ADD_LABEL(ret, end_label);
     }
 
-    if (popped) {
-        ADD_INSN(ret, &line_node, pop);
-    }
     return;
 }
 
@@ -427,10 +426,13 @@ yp_interpolated_node_compile(yp_node_list_t parts, rb_iseq_t *iseq, NODE dummy_l
                 ADD_INSN1(ret, &dummy_line_node, putobject, parse_string(&string_node->unescaped));
             }
             else {
-                YP_COMPILE(part);
+                YP_COMPILE_NOT_POPPED(part);
                 ADD_INSN(ret, &dummy_line_node, dup);
                 ADD_INSN1(ret, &dummy_line_node, objtostring, new_callinfo(iseq, idTo_s, 0, VM_CALL_FCALL | VM_CALL_ARGS_SIMPLE , NULL, FALSE));
                 ADD_INSN(ret, &dummy_line_node, anytostring);
+                if (popped) {
+                    ADD_INSN(ret, &dummy_line_node, pop);
+                }
             }
         }
     }
@@ -490,7 +492,6 @@ yp_new_child_iseq(rb_iseq_t *iseq, yp_scope_node_t * node, yp_parser_t *parser,
     return ret_iseq;
 }
 
-
 static int
 yp_compile_class_path(LINK_ANCHOR *const ret, rb_iseq_t *iseq, const yp_node_t *constant_path_node, const NODE *line_node, const uint8_t * src, bool popped, yp_compile_context_t *compile_context)
 {
@@ -540,17 +541,22 @@ yp_compile_node(rb_iseq_t *iseq, const yp_node_t *node, LINK_ANCHOR *const ret, 
           ADD_INSN1(ret, &dummy_line_node, putspecialobject, INT2FIX(VM_SPECIAL_OBJECT_VMCORE));
           ADD_INSN1(ret, &dummy_line_node, putspecialobject, INT2FIX(VM_SPECIAL_OBJECT_CBASE));
 
-          YP_COMPILE(alias_node->new_name);
-          YP_COMPILE(alias_node->old_name);
+          YP_COMPILE_NOT_POPPED(alias_node->new_name);
+          YP_COMPILE_NOT_POPPED(alias_node->old_name);
 
           ADD_SEND(ret, &dummy_line_node, id_core_set_method_alias, INT2FIX(3));
+
+          if (popped) {
+              ADD_INSN(ret, &dummy_line_node, pop);
+          }
+
           return;
       }
       case YP_AND_NODE: {
           yp_and_node_t *and_node = (yp_and_node_t *) node;
 
           LABEL *end_label = NEW_LABEL(lineno);
-          YP_COMPILE(and_node->left);
+          YP_COMPILE_NOT_POPPED(and_node->left);
           if (!popped) {
               ADD_INSN(ret, &dummy_line_node, dup);
           }
@@ -574,7 +580,7 @@ yp_compile_node(rb_iseq_t *iseq, const yp_node_t *node, LINK_ANCHOR *const ret, 
       case YP_ARRAY_NODE: {
           yp_array_node_t *array_node = (yp_array_node_t *) node;
           yp_node_list_t elements = array_node->elements;
-          if (elements.size == 1 && yp_static_node_literal_p(elements.nodes[0])) {
+          if (elements.size == 1 && yp_static_node_literal_p(elements.nodes[0]) && !popped) {
               VALUE ary = rb_ary_hidden_new(1);
               rb_ary_push(ary, yp_static_literal_value(elements.nodes[0]));
               OBJ_FREEZE(ary);
@@ -665,7 +671,7 @@ yp_compile_node(rb_iseq_t *iseq, const yp_node_t *node, LINK_ANCHOR *const ret, 
               }
           } else {
               yp_arguments_node_t *arguments = call_node->arguments;
-              YP_COMPILE((yp_node_t *) arguments);
+              YP_COMPILE_NOT_POPPED((yp_node_t *) arguments);
               orig_argc = (int)arguments->arguments.size;
           }
 
@@ -840,6 +846,12 @@ yp_compile_node(rb_iseq_t *iseq, const yp_node_t *node, LINK_ANCHOR *const ret, 
           }
           return;
       }
+      case YP_CLASS_VARIABLE_TARGET_NODE: {
+          yp_class_variable_target_node_t *write_node = (yp_class_variable_target_node_t *) node;
+          ID cvar_name = yp_constant_id_lookup(compile_context, write_node->name);
+          ADD_INSN2(ret, &dummy_line_node, setclassvariable, ID2SYM(cvar_name), get_cvar_ic_value(iseq, cvar_name));
+          return;
+      }
       case YP_CLASS_VARIABLE_WRITE_NODE: {
           yp_class_variable_write_node_t *write_node = (yp_class_variable_write_node_t *) node;
           YP_COMPILE_NOT_POPPED(write_node->value);
@@ -933,7 +945,6 @@ yp_compile_node(rb_iseq_t *iseq, const yp_node_t *node, LINK_ANCHOR *const ret, 
           int flags = VM_CALL_ARGS_SIMPLE;
           ADD_SEND_WITH_FLAG(ret, &dummy_line_node, method_id, INT2NUM(1), INT2FIX(flags));
 
-
           if (!popped) {
               ADD_INSN(ret, &dummy_line_node, dup);
           }
@@ -981,6 +992,12 @@ yp_compile_node(rb_iseq_t *iseq, const yp_node_t *node, LINK_ANCHOR *const ret, 
           ADD_INSN1(ret, &dummy_line_node, setconstant, constant_name);
           ADD_LABEL(ret, end_label);
 
+          return;
+      }
+      case YP_CONSTANT_TARGET_NODE: {
+          yp_constant_target_node_t *constant_write_node = (yp_constant_target_node_t *) node;
+          ADD_INSN1(ret, &dummy_line_node, putspecialobject, INT2FIX(VM_SPECIAL_OBJECT_CONST_BASE));
+          ADD_INSN1(ret, &dummy_line_node, setconstant, ID2SYM(yp_constant_id_lookup(compile_context, constant_write_node->name)));
           return;
       }
       case YP_CONSTANT_WRITE_NODE: {
@@ -1135,7 +1152,6 @@ yp_compile_node(rb_iseq_t *iseq, const yp_node_t *node, LINK_ANCHOR *const ret, 
           int flags = VM_CALL_ARGS_SIMPLE;
           ADD_SEND_WITH_FLAG(ret, &dummy_line_node, method_id, INT2NUM(1), INT2FIX(flags));
 
-
           if (!popped) {
               ADD_INSN(ret, &dummy_line_node, dup);
           }
@@ -1188,6 +1204,13 @@ yp_compile_node(rb_iseq_t *iseq, const yp_node_t *node, LINK_ANCHOR *const ret, 
           if (popped) {
               ADD_INSN(ret, &dummy_line_node, pop);
           }
+          return;
+      }
+      case YP_GLOBAL_VARIABLE_TARGET_NODE: {
+          yp_global_variable_target_node_t *write_node = (yp_global_variable_target_node_t *) node;
+
+          ID ivar_name = yp_constant_id_lookup(compile_context, write_node->name);
+          ADD_INSN1(ret, &dummy_line_node, setglobal, ID2SYM(ivar_name));
           return;
       }
       case YP_GLOBAL_VARIABLE_WRITE_NODE: {
@@ -1317,7 +1340,6 @@ yp_compile_node(rb_iseq_t *iseq, const yp_node_t *node, LINK_ANCHOR *const ret, 
                   instance_variable_name_val,
                   get_ivar_ic_value(iseq, instance_variable_name_id));
 
-
           if (!popped) {
               ADD_INSN(ret, &dummy_line_node, dup);
           }
@@ -1349,6 +1371,15 @@ yp_compile_node(rb_iseq_t *iseq, const yp_node_t *node, LINK_ANCHOR *const ret, 
                       ID2SYM(ivar_name),
                       get_ivar_ic_value(iseq, ivar_name));
           }
+          return;
+      }
+      case YP_INSTANCE_VARIABLE_TARGET_NODE: {
+          yp_instance_variable_target_node_t *write_node = (yp_instance_variable_target_node_t *) node;
+
+          ID ivar_name = yp_constant_id_lookup(compile_context, write_node->name);
+          ADD_INSN2(ret, &dummy_line_node, setinstancevariable,
+                  ID2SYM(ivar_name),
+                  get_ivar_ic_value(iseq, ivar_name));
           return;
       }
       case YP_INSTANCE_VARIABLE_WRITE_NODE: {
@@ -1402,9 +1433,6 @@ yp_compile_node(rb_iseq_t *iseq, const yp_node_t *node, LINK_ANCHOR *const ret, 
           if (!popped) {
               ADD_INSN(ret, &dummy_line_node, intern);
           }
-          else {
-              ADD_INSN(ret, &dummy_line_node, pop);
-          }
 
           return;
       }
@@ -1417,7 +1445,6 @@ yp_compile_node(rb_iseq_t *iseq, const yp_node_t *node, LINK_ANCHOR *const ret, 
           if (parts_size > 1) {
               ADD_INSN1(ret, &dummy_line_node, concatstrings, INT2FIX((int)(parts_size)));
           }
-
 
           ADD_SEND_WITH_FLAG(ret, &dummy_line_node, rb_intern("`"), INT2NUM(1), INT2FIX(VM_CALL_FCALL | VM_CALL_ARGS_SIMPLE));
           if (popped) {
@@ -1551,6 +1578,15 @@ yp_compile_node(rb_iseq_t *iseq, const yp_node_t *node, LINK_ANCHOR *const ret, 
           }
           return;
       }
+      case YP_LOCAL_VARIABLE_TARGET_NODE: {
+          yp_local_variable_target_node_t *local_write_node = (yp_local_variable_target_node_t *) node;
+
+          yp_constant_id_t constant_id = local_write_node->name;
+          int index = yp_lookup_local_index(iseq, compile_context, constant_id);
+
+          ADD_SETLOCAL(ret, &dummy_line_node, (int)index, local_write_node->depth);
+          return;
+      }
       case YP_LOCAL_VARIABLE_WRITE_NODE: {
           yp_local_variable_write_node_t *local_write_node = (yp_local_variable_write_node_t *) node;
           YP_COMPILE_NOT_POPPED(local_write_node->value);
@@ -1638,7 +1674,7 @@ yp_compile_node(rb_iseq_t *iseq, const yp_node_t *node, LINK_ANCHOR *const ret, 
           yp_or_node_t *or_node = (yp_or_node_t *) node;
 
           LABEL *end_label = NEW_LABEL(lineno);
-          YP_COMPILE(or_node->left);
+          YP_COMPILE_NOT_POPPED(or_node->left);
 
           if (!popped) {
               ADD_INSN(ret, &dummy_line_node, dup);
@@ -1771,7 +1807,6 @@ yp_compile_node(rb_iseq_t *iseq, const yp_node_t *node, LINK_ANCHOR *const ret, 
           yp_node_list_t requireds_list = YP_EMPTY_NODE_LIST;
           yp_node_list_t optionals_list = YP_EMPTY_NODE_LIST;
 
-
           if (parameters_node) {
               requireds_list = parameters_node->requireds;
               optionals_list = parameters_node->optionals;
@@ -1900,10 +1935,6 @@ yp_compile_node(rb_iseq_t *iseq, const yp_node_t *node, LINK_ANCHOR *const ret, 
                   ID2SYM(singletonclass), singleton_class,
                   INT2FIX(VM_DEFINECLASS_TYPE_SINGLETON_CLASS));
           RB_OBJ_WRITTEN(iseq, Qundef, (VALUE)singleton_class);
-
-          if (popped) {
-              ADD_INSN(ret, &dummy_line_node, pop);
-          }
 
           return;
       }

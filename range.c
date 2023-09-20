@@ -758,6 +758,7 @@ range_bsearch(VALUE range)
                 return bsearch_integer_range(beg, mid, 0);
             }
             diff = rb_funcall(diff, '*', 1, LONG2FIX(2));
+            beg = mid;
         }
     }
     else if (NIL_P(beg) && is_integer_p(end)) {
@@ -770,6 +771,7 @@ range_bsearch(VALUE range)
                 return bsearch_integer_range(mid, end, 0);
             }
             diff = rb_funcall(diff, '*', 1, LONG2FIX(2));
+            end = mid;
         }
     }
     else {
@@ -1818,6 +1820,7 @@ range_string_cover_internal(VALUE range, VALUE val)
             return r_cover_p(range, beg, end, val);
         }
         if (NIL_P(beg)) {
+unbounded_begin:;
             VALUE r = rb_funcall(val, id_cmp, 1, end);
             if (NIL_P(r)) return Qfalse;
             if (RANGE_EXCL(range)) {
@@ -1826,10 +1829,18 @@ range_string_cover_internal(VALUE range, VALUE val)
             return RBOOL(rb_cmpint(r, val, end) <= 0);
         }
         else if (NIL_P(end)) {
+unbounded_end:;
             VALUE r = rb_funcall(beg, id_cmp, 1, val);
             if (NIL_P(r)) return Qfalse;
             return RBOOL(rb_cmpint(r, beg, val) <= 0);
         }
+    }
+
+    if (!NIL_P(beg) && NIL_P(end)) {
+        goto unbounded_end;
+    }
+    if (NIL_P(beg) && !NIL_P(end)) {
+        goto unbounded_begin;
     }
 
     return range_include_fallback(beg, end, val);
@@ -1877,7 +1888,7 @@ static int r_cover_range_p(VALUE range, VALUE beg, VALUE end, VALUE val);
  *    r.cover?(0)     # => false
  *    r.cover?(5)     # => false
  *    r.cover?('foo') # => false
-
+ *
  *    r = ('a'..'d')
  *    r.cover?('a')     # => true
  *    r.cover?('d')     # => true
@@ -1898,7 +1909,7 @@ static int r_cover_range_p(VALUE range, VALUE beg, VALUE end, VALUE val);
  *    r.cover?(0)     # => false
  *    r.cover?(4)     # => false
  *    r.cover?('foo') # => false
-
+ *
  *    r = ('a'...'d')
  *    r.cover?('a')     # => true
  *    r.cover?('c')     # => true
@@ -1914,7 +1925,7 @@ static int r_cover_range_p(VALUE range, VALUE beg, VALUE end, VALUE val);
  *    r.cover?(0..4)     # => false
  *    r.cover?(1..5)     # => false
  *    r.cover?('a'..'d') # => false
-
+ *
  *    r = (1...4)
  *    r.cover?(1..3)     # => true
  *    r.cover?(1..4)     # => false
@@ -2147,6 +2158,101 @@ range_count(int argc, VALUE *argv, VALUE range)
     else {
         return rb_call_super(argc, argv);
     }
+}
+
+static bool
+empty_region_p(VALUE beg, VALUE end, int excl)
+{
+    if (NIL_P(beg)) return false;
+    if (NIL_P(end)) return false;
+    int less = r_less(beg, end);
+    /* empty range */
+    if (less > 0) return true;
+    if (excl && less == 0) return true;
+    return false;
+}
+
+/*
+ *  call-seq:
+ *    overlap?(range) -> true or false
+ *
+ *  Returns +true+ if +range+ overlaps with +self+, +false+ otherwise:
+ *
+ *    (0..2).overlap?(1..3) #=> true
+ *    (0..2).overlap?(3..4) #=> false
+ *    (0..).overlap?(..0)   #=> true
+ *
+ *  With non-range argument, raises TypeError.
+ *
+ *    (1..3).overlap?(1)         # TypeError
+ *
+ *  Returns +false+ if an internal call to <tt><=></tt> returns +nil+;
+ *  that is, the operands are not comparable.
+ *
+ *    (1..3).overlap?('a'..'d')  # => false
+ *
+ *  Returns +false+ if +self+ or +range+ is empty. "Empty range" means
+ *  that its begin value is larger than, or equal for an exclusive
+ *  range, its end value.
+ *
+ *    (4..1).overlap?(2..3)      # => false
+ *    (4..1).overlap?(..3)       # => false
+ *    (4..1).overlap?(2..)       # => false
+ *    (2...2).overlap?(1..2)     # => false
+ *
+ *    (1..4).overlap?(3..2)      # => false
+ *    (..4).overlap?(3..2)       # => false
+ *    (1..).overlap?(3..2)       # => false
+ *    (1..2).overlap?(2...2)     # => false
+ *
+ *  Returns +false+ if the begin value one of +self+ and +range+ is
+ *  larger than, or equal if the other is an exclusive range, the end
+ *  value of the other:
+ *
+ *    (4..5).overlap?(2..3)      # => false
+ *    (4..5).overlap?(2...4)     # => false
+ *
+ *    (1..2).overlap?(3..4)      # => false
+ *    (1...3).overlap?(3..4)     # => false
+ *
+ *  Returns +false+ if the end value one of +self+ and +range+ is
+ *  larger than, or equal for an exclusive range, the end value of the
+ *  other:
+ *
+ *    (4..5).overlap?(2..3)      # => false
+ *    (4..5).overlap?(2...4)     # => false
+ *
+ *    (1..2).overlap?(3..4)      # => false
+ *    (1...3).overlap?(3..4)     # => false
+ *
+ *  Related: Range#cover?.
+ */
+
+static VALUE
+range_overlap(VALUE range, VALUE other)
+{
+    if (!rb_obj_is_kind_of(other, rb_cRange)) {
+        rb_raise(rb_eTypeError, "wrong argument type %"PRIsVALUE" (expected Range)",
+                 rb_class_name(rb_obj_class(other)));
+    }
+
+    VALUE self_beg = RANGE_BEG(range);
+    VALUE self_end = RANGE_END(range);
+    int self_excl = EXCL(range);
+    VALUE other_beg = RANGE_BEG(other);
+    VALUE other_end = RANGE_END(other);
+    int other_excl = EXCL(other);
+
+    if (empty_region_p(self_beg, other_end, other_excl)) return Qfalse;
+    if (empty_region_p(other_beg, self_end, self_excl)) return Qfalse;
+
+    /* if both begin values are equal, no more comparisons needed */
+    if (rb_equal(self_beg, other_beg)) return Qtrue;
+
+    if (empty_region_p(self_beg, self_end, self_excl)) return Qfalse;
+    if (empty_region_p(other_beg, other_end, other_excl)) return Qfalse;
+
+    return Qtrue;
 }
 
 /* A \Range object represents a collection of values
@@ -2415,4 +2521,5 @@ Init_Range(void)
     rb_define_method(rb_cRange, "include?", range_include, 1);
     rb_define_method(rb_cRange, "cover?", range_cover, 1);
     rb_define_method(rb_cRange, "count", range_count, -1);
+    rb_define_method(rb_cRange, "overlap?", range_overlap, 1);
 }

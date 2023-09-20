@@ -434,15 +434,13 @@ module SyncDefaultGems
 
     # Common patterns
     patterns << %r[\A(?:
-      [A-Z]\w*\.(?:md|txt)
-      |[^/]+\.yml
+      [^/]+ # top-level entries
       |\.git.*
-      |[A-Z]\w+file
-      |COPYING
-      |Gemfile.lock
       |bin/.*
+      |ext/.*\.java
       |rakelib/.*
-      |test/lib/.*
+      |test/(?:lib|fixtures)/.*
+      |tool/.*
     )\z]mx
 
     # Gem-specific patterns
@@ -565,16 +563,11 @@ module SyncDefaultGems
     changed = changed.reject do |f|
       case
       when toplevels.fetch(top = f[%r[\A[^/]+(?=/|\z)]m]) {
-             remove << top unless
-               toplevels[top] = system(*%w"git cat-file -e", "#{base}:#{top}", err: File::NULL)
+             remove << top if toplevels[top] =
+                              !system(*%w"git cat-file -e", "#{base}:#{top}", err: File::NULL)
            }
         # Remove any new top-level directories.
         true
-      when !f.include?("/"),
-           f.start_with?("test/fixtures/", "test/lib/", "tool/")
-        # Forcibly reset any top-level entries, and any changes under
-        # /test/fixtures, /test/lib, or /tool.
-        ignore << f
       when ignore_file_pattern.match?(f)
         # Forcibly reset any changes matching ignore_file_pattern.
         ignore << f
@@ -603,7 +596,7 @@ module SyncDefaultGems
     unless ignore.empty?
       puts "Reset ignored files: #{ignore.join(', ')}"
       system(*%W"git rm -r --", *ignore)
-      system(*%W"git checkout -f", base, "--", *ignore)
+      ignore.each {|f| system(*%W"git checkout -f", base, "--", f)}
     end
 
     if changed.empty?

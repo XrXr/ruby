@@ -1627,7 +1627,8 @@ static int looking_at_eol_p(struct parser_params *p);
 %type <id>   f_kwrest f_label f_arg_asgn call_op call_op2 reswords relop dot_or_colon
 %type <id>   p_kwrest p_kwnorest p_any_kwrest p_kw_label
 %type <id>   f_no_kwarg f_any_kwrest args_forward excessed_comma nonlocal_var
- %type <ctxt> lex_ctxt begin_defined k_class k_module /* keep <ctxt> in ripper */
+%type <ctxt> lex_ctxt begin_defined k_class k_module
+%type <tbl>  p_lparen p_lbracket
 %token END_OF_INPUT 0	"end-of-input"
 %token <id> '.'
 /* escaped chars, should be ignored otherwise */
@@ -4625,14 +4626,14 @@ p_alt		: p_alt '|' p_expr_basic
                 | p_expr_basic
                 ;
 
-p_lparen	: '(' {$<tbl>$ = push_pktbl(p);};
-p_lbracket	: '[' {$<tbl>$ = push_pktbl(p);};
+p_lparen	: '(' {$$ = push_pktbl(p);};
+p_lbracket	: '[' {$$ = push_pktbl(p);};
 
 p_expr_basic	: p_value
                 | p_variable
                 | p_const p_lparen p_args rparen
                     {
-                        pop_pktbl(p, $<tbl>2);
+                        pop_pktbl(p, $2);
                         $$ = new_array_pattern(p, $1, Qnone, $3, &@$);
                     /*%%%*/
                         nd_set_first_loc($$, @1.beg_pos);
@@ -4641,7 +4642,7 @@ p_expr_basic	: p_value
                     }
                 | p_const p_lparen p_find rparen
                     {
-                        pop_pktbl(p, $<tbl>2);
+                        pop_pktbl(p, $2);
                         $$ = new_find_pattern(p, $1, $3, &@$);
                     /*%%%*/
                         nd_set_first_loc($$, @1.beg_pos);
@@ -4650,7 +4651,7 @@ p_expr_basic	: p_value
                     }
                 | p_const p_lparen p_kwargs rparen
                     {
-                        pop_pktbl(p, $<tbl>2);
+                        pop_pktbl(p, $2);
                         $$ = new_hash_pattern(p, $1, $3, &@$);
                     /*%%%*/
                         nd_set_first_loc($$, @1.beg_pos);
@@ -4664,7 +4665,7 @@ p_expr_basic	: p_value
                     }
                 | p_const p_lbracket p_args rbracket
                     {
-                        pop_pktbl(p, $<tbl>2);
+                        pop_pktbl(p, $2);
                         $$ = new_array_pattern(p, $1, Qnone, $3, &@$);
                     /*%%%*/
                         nd_set_first_loc($$, @1.beg_pos);
@@ -4673,7 +4674,7 @@ p_expr_basic	: p_value
                     }
                 | p_const p_lbracket p_find rbracket
                     {
-                        pop_pktbl(p, $<tbl>2);
+                        pop_pktbl(p, $2);
                         $$ = new_find_pattern(p, $1, $3, &@$);
                     /*%%%*/
                         nd_set_first_loc($$, @1.beg_pos);
@@ -4682,7 +4683,7 @@ p_expr_basic	: p_value
                     }
                 | p_const p_lbracket p_kwargs rbracket
                     {
-                        pop_pktbl(p, $<tbl>2);
+                        pop_pktbl(p, $2);
                         $$ = new_hash_pattern(p, $1, $3, &@$);
                     /*%%%*/
                         nd_set_first_loc($$, @1.beg_pos);
@@ -9557,22 +9558,22 @@ parse_gvar(struct parser_params *p, const enum lex_state_e last_state)
         pushback(p, c);
         c = '_';
         /* fall through */
-      case '~':		/* $~: match-data */
-      case '*':		/* $*: argv */
-      case '$':		/* $$: pid */
-      case '?':		/* $?: last status */
-      case '!':		/* $!: error string */
-      case '@':		/* $@: error position */
-      case '/':		/* $/: input record separator */
-      case '\\':		/* $\: output record separator */
-      case ';':		/* $;: field separator */
-      case ',':		/* $,: output field separator */
-      case '.':		/* $.: last read line number */
-      case '=':		/* $=: ignorecase */
-      case ':':		/* $:: load path */
-      case '<':		/* $<: reading filename */
-      case '>':		/* $>: default output handle */
-      case '\"':		/* $": already loaded files */
+      case '~': 	/* $~: match-data */
+      case '*': 	/* $*: argv */
+      case '$': 	/* $$: pid */
+      case '?': 	/* $?: last status */
+      case '!': 	/* $!: error string */
+      case '@': 	/* $@: error position */
+      case '/': 	/* $/: input record separator */
+      case '\\':	/* $\: output record separator */
+      case ';': 	/* $;: field separator */
+      case ',': 	/* $,: output field separator */
+      case '.': 	/* $.: last read line number */
+      case '=': 	/* $=: ignorecase */
+      case ':': 	/* $:: load path */
+      case '<': 	/* $<: reading filename */
+      case '>': 	/* $>: default output handle */
+      case '\"':	/* $": already loaded files */
         tokadd(p, '$');
         tokadd(p, c);
         goto gvar;
@@ -9593,10 +9594,10 @@ parse_gvar(struct parser_params *p, const enum lex_state_e last_state)
         set_yylval_name(TOK_INTERN());
         return tGVAR;
 
-      case '&':		/* $&: last match */
-      case '`':		/* $`: string before last match */
-      case '\'':		/* $': string after last match */
-      case '+':		/* $+: string matches last paren. */
+      case '&': 	/* $&: last match */
+      case '`': 	/* $`: string before last match */
+      case '\'':	/* $': string after last match */
+      case '+': 	/* $+: string matches last paren. */
         if (IS_lex_state_for(last_state, EXPR_FNAME)) {
             tokadd(p, '$');
             tokadd(p, c);
@@ -13052,14 +13053,6 @@ new_op_assign(struct parser_params *p, NODE *lhs, ID op, NODE *rhs, struct lex_c
             lhs->nd_value = rhs;
             nd_set_loc(lhs, loc);
             asgn = NEW_OP_ASGN_OR(gettable(p, vid, &lhs_loc), lhs, loc);
-            if (is_notop_id(vid)) {
-                switch (id_type(vid)) {
-                  case ID_GLOBAL:
-                  case ID_INSTANCE:
-                  case ID_CLASS:
-                    asgn->nd_aid = vid;
-                }
-            }
         }
         else if (op == tANDOP) {
             if (shareable) {
