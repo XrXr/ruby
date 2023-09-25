@@ -814,12 +814,12 @@ struct rb_block {
 
 #define ASSERT_FRAME_MATERIALIZED(cfp) RUBY_ASSERT(! (cfp)->jit_frame)
 
-#define JIT_FRAME_CFRAME_P(cfp) (VM_FRAME_MAGIC_CFUNC == ((cfp)->jit_frame->flags & VM_FRAME_MAGIC_MASK))
+#define JIT_FRAME_CFRAME_P(cfp) (VM_FRAME_MAGIC_CFUNC == (outlined_frames[(cfp)->jit_frame].flags & VM_FRAME_MAGIC_MASK))
 
-#define CFP_PC(cfp) ((cfp)->jit_frame ? (cfp)->jit_frame->pc : (cfp)->_pc)
+#define CFP_PC(cfp) ((cfp)->jit_frame ? outlined_frames[(cfp)->jit_frame].pc : (cfp)->_pc)
 
 // FIXME: this is recursive and can blow the machine stack
-#define CFP_SP(cfp) (((cfp)->jit_frame && !JIT_FRAME_CFRAME_P(cfp)) ? (rb_vm_base_ptr(cfp) + (cfp)->jit_frame->sp_offset) : (cfp)->_sp)
+#define CFP_SP(cfp) (((cfp)->jit_frame && !JIT_FRAME_CFRAME_P(cfp)) ? (rb_vm_base_ptr(cfp) + outlined_frames[(cfp)->jit_frame].sp_offset) : (cfp)->_sp)
 
 #define CFP_ISEQ(cfp) (((cfp)->jit_frame && JIT_FRAME_CFRAME_P(cfp)) ? 0 : (cfp)->_iseq)
 
@@ -829,6 +829,8 @@ typedef struct rb_jit_frame {
     VALUE flags;
 } rb_jit_frame_t;
 
+extern rb_jit_frame_t outlined_frames[100000];
+
 typedef struct rb_control_frame_struct {
     const VALUE *_pc;          // cfp[0]
     VALUE *_sp;                // cfp[1]
@@ -837,7 +839,7 @@ typedef struct rb_control_frame_struct {
     const VALUE *ep;           // cfp[4] / block[1]
     const void *block_code;    // cfp[5] / block[2] -- iseq, ifunc, or forwarded block handler
     void *jit_return;          // cfp[6] -- return address for JIT code
-    rb_jit_frame_t *jit_frame; // cfp[7]
+    VALUE jit_frame; // cfp[7]
 #if VM_DEBUG_BP_CHECK
     VALUE *bp_check;           // cfp[8]
 #endif
@@ -1339,8 +1341,8 @@ rb_vm_cfp_materialize(rb_control_frame_t *cfp)
     if (cfp->jit_frame) {
         cfp->_pc = CFP_PC(cfp);
         cfp->_sp = CFP_SP(cfp);
-        if (cfp->jit_frame->flags & VM_FRAME_FLAG_CFRAME) cfp->_iseq = 0;
-        cfp->jit_frame = NULL;
+        if (outlined_frames[cfp->jit_frame].flags & VM_FRAME_FLAG_CFRAME) cfp->_iseq = 0;
+        cfp->jit_frame = 0;
     }
 }
 

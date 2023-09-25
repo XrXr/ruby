@@ -297,11 +297,15 @@ fn jit_prepare_routine_call(
 }
 
 impl rb_jit_frame_t {
-    fn move_to_heap(self) -> *const Self {
+    fn move_to_heap(self) -> usize {
         unsafe {
+            extern "C" {
+                static latest_outlined_frame: usize;
+            }
+            let idx = latest_outlined_frame;
             let frame = rb_yjit_frame_new();
             frame.write(self);
-            frame
+            idx
         }
     }
 }
@@ -322,7 +326,7 @@ fn jit_bump_progress(jit: &mut JITState, asm: &mut Assembler) {
         sp_offset: asm.ctx.get_stack_size().into(),
         flags: VALUE(0),
     }.move_to_heap();
-    asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), Opnd::const_ptr(jit_frame as _));
+    asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), jit_frame.into());
 }
 
 /// Record the current codeblock write position for rewriting into a jump into
@@ -5276,7 +5280,7 @@ fn gen_push_frame(
             sp_offset: 0,
             flags: VALUE(frame.frame_type.as_usize()),
         }.move_to_heap();
-        asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), Opnd::const_ptr(cframe_jit_frame as _));
+        asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), cframe_jit_frame.into());
     } else {
         asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
     }
