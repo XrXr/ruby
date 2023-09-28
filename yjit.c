@@ -1169,13 +1169,10 @@ rb_yjit_set_exception_return(rb_control_frame_t *cfp, void *leave_exit, void *le
     }
 }
 
-rb_jit_frame_t outlined_frames[100000];
-size_t latest_outlined_frame = 1; // TODO(outlined): better name
-
 rb_jit_frame_t *
 rb_yjit_frame_new(void)
 {
-    return &outlined_frames[latest_outlined_frame++];
+    return ALLOC(rb_jit_frame_t);
 }
 
 // Primitives used by yjit.rb

@@ -383,7 +383,7 @@ vm_push_frame(rb_execution_context_t *ec,
         .ep         = sp - 1,
         .block_code = NULL,
         .jit_return = NULL,
-        .jit_frame  = 0,
+        .jit_frame  = NULL,
 #if VM_DEBUG_BP_CHECK
         .bp_check   = sp,
 #endif
