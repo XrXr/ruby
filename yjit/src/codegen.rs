@@ -5255,13 +5255,8 @@ fn gen_push_frame(
     // For an iseq call PC may be None, in which case we will not set PC and will allow jitted code
     // to set it as necessary.
     if let Some(pc) = frame.pc {
-        //let jit_frame = unsafe { rb_yjit_frame_new(pc as _) } as usize;
-        //asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), jit_frame.into());
         asm.mov(cfp_opnd(RUBY_OFFSET_CFP_PC), pc.into());
-    } else {
-        //asm.mov(cfp_opnd(RUBY_OFFSET_CFP_PC), 0.into());
-        //asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
-    };
+    }
     asm.mov(cfp_opnd(RUBY_OFFSET_CFP_SP), sp);
     if let Some(iseq) = frame.iseq {
         asm.mov(cfp_opnd(RUBY_OFFSET_CFP_ISEQ), VALUE::from(iseq).into());
