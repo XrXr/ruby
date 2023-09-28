@@ -5151,6 +5151,7 @@ struct ControlFrame {
     recv: Opnd,
     sp: Opnd,
     iseq: Option<IseqPtr>,
+    cfunc_args_and_self: i32,
     pc: Option<u64>,
     frame_type: u32,
     specval: SpecVal,
@@ -5268,7 +5269,7 @@ fn gen_push_frame(
     if frame.iseq.is_none() {
         let cframe_jit_frame = rb_jit_frame_t {
             pc: ptr::null_mut(),
-            sp_offset: VM_ENV_DATA_SIZE as _,
+            sp_offset: VM_ENV_DATA_SIZE as i32 + frame.cfunc_args_and_self,
             flags: VALUE(frame.frame_type.as_usize()),
         }.move_to_heap();
         asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), Opnd::const_ptr(cframe_jit_frame as _));
@@ -5478,6 +5479,7 @@ fn gen_send_cfunc(
 
     // Increment the stack pointer by 3 (in the callee)
     // sp += 3
+    // TODO(outline): This `lea` could go away by switching to using stack operands for the env data.
     let sp = asm.lea(asm.ctx.sp_opnd((SIZEOF_VALUE as isize) * 3));
 
     let specval = if block_arg_type == Some(Type::BlockParamProxy) {
@@ -5503,9 +5505,12 @@ fn gen_send_cfunc(
             None     // Leave PC uninitialized as cfuncs shouldn't read it
         },
         iseq: None,
+        cfunc_args_and_self: argc + 1,
     });
 
     // Pop the C function arguments from the stack (in the caller)
+    // :send-cfunc-receiver: The receiver is always on stack when calling C methods.
+    // This is unlike iseqs, where `yield` (invokeblock) has no receiver on stack.
     asm.stack_pop((argc + 1).try_into().unwrap());
 
     // Progress bump in the _caller_. Even though we've pushed
@@ -6539,6 +6544,7 @@ fn gen_send_iseq(
         sp: callee_sp,
         iseq: Some(iseq),
         pc: None, // We are calling into jitted code, which will set the PC as necessary
+        cfunc_args_and_self: 0,
     });
 
     // No need to set cfp->pc since the callee sets it whenever calling into routines
