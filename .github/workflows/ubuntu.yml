@@ -64,7 +64,7 @@ jobs:
       )}}
 
     steps:
-      - uses: actions/checkout@3df4ab11eba7bda6032a0b82a6bb43b11571feac # v4.0.0
+      - uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608 # v4.1.0
         with:
           sparse-checkout-cone-mode: false
           sparse-checkout: /.github
@@ -100,8 +100,8 @@ jobs:
       - name: make ${{ matrix.test_task }}
         run: >-
           $SETARCH make -s ${{ matrix.test_task }}
-            ${TESTS:+TESTS=`echo "$TESTS" | sed 's| |$$/ -n!/|g;s|^|-n!/|;s|$|$$/|'`}
-            ${{ contains(matrix.test_task, 'bundle') && '' || 'RUBYOPT=-w' }}
+          ${TESTS:+TESTS=`echo "$TESTS" | sed 's| |$$/ -n!/|g;s|^|-n!/|;s|$|$$/|'`}
+          ${{ !contains(matrix.test_task, 'bundle') && 'RUBYOPT=-w' || '' }}
         timeout-minutes: 40
         env:
           RUBY_TESTOPTS: '-q --tty=no'
