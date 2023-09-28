@@ -5273,7 +5273,7 @@ fn gen_push_frame(
     if frame.iseq.is_none() {
         let cframe_jit_frame = rb_jit_frame_t {
             pc: ptr::null_mut(),
-            sp_offset: 0,
+            sp_offset: VM_ENV_DATA_SIZE as _,
             flags: VALUE(frame.frame_type.as_usize()),
         }.move_to_heap();
         asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), Opnd::const_ptr(cframe_jit_frame as _));

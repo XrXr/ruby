@@ -812,17 +812,6 @@ struct rb_block {
     enum rb_block_type type;
 };
 
-#define ASSERT_FRAME_MATERIALIZED(cfp) RUBY_ASSERT(! (cfp)->jit_frame)
-
-#define JIT_FRAME_CFRAME_P(cfp) (VM_FRAME_MAGIC_CFUNC == ((cfp)->jit_frame->flags & VM_FRAME_MAGIC_MASK))
-
-#define CFP_PC(cfp) ((cfp)->jit_frame ? (cfp)->jit_frame->pc : (cfp)->_pc)
-
-// FIXME: this is recursive and can blow the machine stack
-#define CFP_SP(cfp) (((cfp)->jit_frame && !JIT_FRAME_CFRAME_P(cfp)) ? (rb_vm_base_ptr(cfp) + (cfp)->jit_frame->sp_offset) : (cfp)->_sp)
-
-#define CFP_ISEQ(cfp) (((cfp)->jit_frame && JIT_FRAME_CFRAME_P(cfp)) ? 0 : (cfp)->_iseq)
-
 typedef struct rb_jit_frame {
     VALUE *pc;
     int32_t sp_offset;
@@ -843,7 +832,16 @@ typedef struct rb_control_frame_struct {
 #endif
 } rb_control_frame_t;
 
-VALUE *rb_vm_base_ptr(const rb_control_frame_t *cfp);
+#define ASSERT_FRAME_MATERIALIZED(cfp) RUBY_ASSERT(! (cfp)->jit_frame)
+
+#define JIT_FRAME_CFRAME_P(cfp) (VM_FRAME_MAGIC_CFUNC == ((cfp)->jit_frame->flags & VM_FRAME_MAGIC_MASK))
+
+#define CFP_PC(cfp) ((cfp)->jit_frame ? (cfp)->jit_frame->pc : (cfp)->_pc)
+
+VALUE *rb_vm_jit_frame_sp(const rb_control_frame_t *cfp);
+#define CFP_SP(cfp) (((cfp)->jit_frame) ? rb_vm_jit_frame_sp(cfp) : (cfp)->_sp)
+
+#define CFP_ISEQ(cfp) (((cfp)->jit_frame && JIT_FRAME_CFRAME_P(cfp)) ? 0 : (cfp)->_iseq)
 
 extern const rb_data_type_t ruby_threadptr_data_type;
 

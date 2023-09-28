@@ -2499,6 +2499,25 @@ rb_vm_base_ptr(const rb_control_frame_t *cfp)
     return vm_base_ptr(cfp);
 }
 
+VALUE *
+rb_vm_jit_frame_sp(const rb_control_frame_t *cfp)
+{
+    // Sum offsets of all jit frames
+    ptrdiff_t tally = 0;
+    while (cfp->jit_frame) {
+        if (CFP_ISEQ(cfp)) {
+            tally += ISEQ_BODY(CFP_ISEQ(cfp))->local_table_size + VM_ENV_DATA_SIZE;
+            if (ISEQ_BODY(CFP_ISEQ(cfp))->type == ISEQ_TYPE_METHOD || VM_FRAME_BMETHOD_P(cfp)) {
+                /* adjust `self' */
+                tally += 1;
+            }
+        }
+        tally += cfp->jit_frame->sp_offset;
+        cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
+    }
+    return cfp->_sp + tally;
+}
+
 /* method call processes with call_info */
 
 #include "vm_args.c"
