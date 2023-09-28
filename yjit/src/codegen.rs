@@ -5258,8 +5258,8 @@ fn gen_push_frame(
     if let Some(pc) = frame.pc {
         asm.mov(cfp_opnd(RUBY_OFFSET_CFP_PC), pc.into());
     }
-    asm.mov(cfp_opnd(RUBY_OFFSET_CFP_SP), sp);
     if let Some(iseq) = frame.iseq {
+        asm.mov(cfp_opnd(RUBY_OFFSET_CFP_SP), sp);
         asm.mov(cfp_opnd(RUBY_OFFSET_CFP_ISEQ), VALUE::from(iseq).into());
     }
     asm.mov(cfp_opnd(RUBY_OFFSET_CFP_SELF), frame.recv);
