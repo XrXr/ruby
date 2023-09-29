@@ -1169,7 +1169,6 @@ extern "C" {
         klass: VALUE,
         id: ID,
     ) -> *const rb_callable_method_entry_t;
-    pub fn rb_vm_base_ptr(cfp: *const rb_control_frame_t) -> *mut VALUE;
     pub static mut rb_mRubyVMFrozenCore: VALUE;
     pub static mut rb_block_param_proxy: VALUE;
     pub fn rb_vm_ep_local_ep(ep: *const VALUE) -> *const VALUE;
