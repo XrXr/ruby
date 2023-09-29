@@ -2150,6 +2150,10 @@ fn gen_block_series_body(
     Some(first_block)
 }
 
+extern "C" {
+    fn rb_vm_base_ptr(cfp: *const rb_control_frame_t) -> *mut VALUE;
+}
+
 /// Generate a block version that is an entry point inserted into an iseq
 /// NOTE: this function assumes that the VM lock has been taken
 /// If jit_exception is true, compile JIT code for handling exceptions.
@@ -2162,7 +2166,7 @@ pub fn gen_entry_point(iseq: IseqPtr, ec: EcPtr, jit_exception: bool) -> Option<
         iseq_pc_to_insn_idx(iseq, ec_pc)?
     };
     let stack_size: u8 = unsafe {
-        u8::try_from(get_cfp_sp(cfp).offset_from(get_cfp_bp(cfp))).ok()?
+        u8::try_from(get_cfp_sp(cfp).offset_from(rb_vm_base_ptr(cfp))).ok()?
     };
 
     // The entry context makes no assumptions about types
@@ -2265,7 +2269,7 @@ fn entry_stub_hit_body(entry_ptr: *const c_void, ec: EcPtr) -> Option<*const u8>
     let iseq = unsafe { get_cfp_iseq(cfp) };
     let insn_idx = iseq_pc_to_insn_idx(iseq, unsafe { get_cfp_pc(cfp) })?;
     let stack_size: u8 = unsafe {
-        u8::try_from(get_cfp_sp(cfp).offset_from(get_cfp_bp(cfp))).ok()?
+        u8::try_from(get_cfp_sp(cfp).offset_from(rb_vm_base_ptr(cfp))).ok()?
     };
 
     let cb = CodegenGlobals::get_inline_cb();
@@ -2488,7 +2492,7 @@ fn branch_stub_hit_body(branch_ptr: *const c_void, target_idx: u32, ec: EcPtr) -
 
         let running_iseq = rb_cfp_get_iseq(cfp);
         let reconned_pc = rb_iseq_pc_at_idx(running_iseq, target_blockid.idx.into());
-        let reconned_sp = get_cfp_bp(cfp).add(target_ctx.stack_size.into());
+        let reconned_sp = rb_vm_base_ptr(cfp).add(target_ctx.stack_size.into());
 
         assert_eq!(running_iseq, target_blockid.iseq as _, "each stub expects a particular iseq");
 
