@@ -5,3 +5,7 @@
 # This test file includes tests which point out known bugs.
 # So all tests will cause failure.
 #
+print(begin
+  ans = []
+  1.times { }
+end)

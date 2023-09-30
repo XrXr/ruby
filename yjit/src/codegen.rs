@@ -657,13 +657,18 @@ fn gen_leave_exception(ocb: &mut OutlinedCb) -> CodePtr {
     let code_ptr = ocb.get_write_ptr();
     let mut asm = Assembler::new();
 
+    // gen_leave() leaves the return value in C_RET_OPND before coming here.
+    let ruby_ret_val = asm.live_reg_opnd(C_RET_OPND);
+
     // Every exit to the interpreter should be counted
     gen_counter_incr(&mut asm, Counter::leave_interp_return);
 
-    asm_comment!(asm, "increment SP of the caller");
-    let sp = Opnd::mem(64, CFP, RUBY_OFFSET_CFP_SP);
+    asm_comment!(asm, "push return value through cfp->sp");
+    let cfp_sp = Opnd::mem(64, CFP, RUBY_OFFSET_CFP_SP);
+    let sp = asm.load(cfp_sp);
+    asm.mov(Opnd::mem(64, sp, 0), ruby_ret_val);
     let new_sp = asm.add(sp, SIZEOF_VALUE.into());
-    asm.mov(sp, new_sp);
+    asm.mov(cfp_sp, new_sp);
 
     asm_comment!(asm, "exit from exception");
     asm.cpop_into(SP);
@@ -7810,6 +7815,8 @@ fn gen_leave(
     asm.mov(C_RET_OPND, retval_opnd);
 
     // Jump to the JIT return address on the frame that was just popped
+    // TODO(outline): comment here possible continuations. gen_leave_exit(), gen_leave_exception(),
+    // gen_send_iseq()
     let offset_to_jit_return =
         -(RUBY_SIZEOF_CONTROL_FRAME as i32) + RUBY_OFFSET_CFP_JIT_RETURN;
     asm.jmp_opnd(Opnd::mem(64, CFP, offset_to_jit_return));
