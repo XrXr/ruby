@@ -949,6 +949,7 @@ pub struct SideExitContext {
     pub stack_size: u8,
     pub sp_offset: i8,
     pub reg_temps: RegTemps,
+    pub is_return_landing: bool,
 }
 
 impl SideExitContext {
@@ -959,10 +960,11 @@ impl SideExitContext {
             stack_size: ctx.get_stack_size(),
             sp_offset: ctx.get_sp_offset(),
             reg_temps: ctx.get_reg_temps(),
+            is_return_landing: ctx.is_return_landing(),
         };
         if cfg!(debug_assertions) {
             // Assert that we're not losing any mandatory metadata
-            //assert_eq!(exit_ctx.get_ctx(), ctx.get_generic_ctx());
+            assert_eq!(exit_ctx.get_ctx(), ctx.get_generic_ctx());
         }
         exit_ctx
     }
@@ -973,6 +975,9 @@ impl SideExitContext {
         ctx.set_stack_size(self.stack_size);
         ctx.set_sp_offset(self.sp_offset);
         ctx.set_reg_temps(self.reg_temps);
+        if self.is_return_landing {
+            ctx.set_as_return_landing();
+        }
         ctx
     }
 }

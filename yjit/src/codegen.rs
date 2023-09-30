@@ -453,6 +453,12 @@ fn gen_exit(exit_pc: *mut VALUE, asm: &mut Assembler) {
         asm_comment!(asm, "exit to interpreter on {}", insn_name(opcode as usize));
     }
 
+    if asm.ctx.is_return_landing() {
+        asm.mov(SP, Opnd::mem(64, CFP, RUBY_OFFSET_CFP_SP));
+        let top = asm.stack_push(Type::Unknown);
+        asm.mov(top, C_RET_OPND);
+    }
+
     // Spill stack temps before returning to the interpreter
     asm.spill_temps();
 

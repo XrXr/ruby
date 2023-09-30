@@ -2722,7 +2722,9 @@ pub fn gen_branch_stub_hit_trampoline(ocb: &mut OutlinedCb) -> CodePtr {
     // Jump to the address returned by the branch_stub_hit() call
     asm.jmp_opnd(jump_addr2);
 
-    asm.test(jump_addr, 0usize.into());
+    asm.test(jump_addr, 0usize.into()); // HACK: maintain liveness of c return reg so we get a
+                                        // scratch register for keeping the return value of
+                                        // branch_stub_hit().
 
     asm.compile(ocb, None);
 
