@@ -450,8 +450,11 @@ pub struct Context {
     /// Bitmap of which stack temps are in a register
     reg_temps: RegTemps,
 
-    // Depth of this block in the sidechain (eg: inline-cache chain)
-    chain_depth: u8,
+    /// Fields packed into u8
+    /// - Lower 7 bits: Depth of this block in the sidechain (eg: inline-cache chain)
+    /// - Top bit: Whether this code is the target of a JIT-to-JIT Ruby return
+    ///   ([Self::is_return_landing])
+    chain_depth_plus: u8,
 
     // Local variable types we keep track of
     local_types: [Type; MAX_LOCAL_TYPES],
@@ -1393,7 +1396,7 @@ fn find_block_version(blockid: BlockId, ctx: &Context) -> Option<BlockRef> {
 /// Produce a generic context when the block version limit is hit for a blockid
 pub fn limit_block_versions(blockid: BlockId, ctx: &Context) -> Context {
     // Guard chains implement limits separately, do nothing
-    if ctx.chain_depth > 0 {
+    if ctx.get_chain_depth() > 0 {
         return ctx.clone();
     }
 
@@ -1601,6 +1604,9 @@ impl Context {
         generic_ctx.stack_size = self.stack_size;
         generic_ctx.sp_offset = self.sp_offset;
         generic_ctx.reg_temps = self.reg_temps;
+        if self.is_return_landing() {
+            generic_ctx.set_as_return_landing();
+        }
         generic_ctx
     }
 
@@ -1631,15 +1637,30 @@ impl Context {
     }
 
     pub fn get_chain_depth(&self) -> u8 {
-        self.chain_depth
+        self.chain_depth_plus & 0x7f
     }
 
     pub fn reset_chain_depth(&mut self) {
-        self.chain_depth = 0;
+        self.chain_depth_plus &= 0x80;
     }
 
     pub fn increment_chain_depth(&mut self) {
-        self.chain_depth += 1;
+        if self.get_chain_depth() == 0x7f {
+            panic!("max block version chain depth reached!");
+        }
+        self.chain_depth_plus += 1;
+    }
+
+    pub fn set_as_return_landing(&mut self) {
+        self.chain_depth_plus |= 0x80;
+    }
+
+    pub fn clear_return_landing(&mut self) {
+        self.chain_depth_plus &= 0x7f;
+    }
+
+    pub fn is_return_landing(&self) -> bool {
+        self.chain_depth_plus & 0x80 > 0
     }
 
     /// Get an operand for the adjusted stack pointer address
@@ -1836,13 +1857,17 @@ impl Context {
         let src = self;
 
         // Can only lookup the first version in the chain
-        if dst.chain_depth != 0 {
+        if dst.get_chain_depth() != 0 {
             return TypeDiff::Incompatible;
         }
 
         // Blocks with depth > 0 always produce new versions
         // Sidechains cannot overlap
-        if src.chain_depth != 0 {
+        if src.get_chain_depth() != 0 {
+            return TypeDiff::Incompatible;
+        }
+
+        if src.is_return_landing() != dst.is_return_landing() {
             return TypeDiff::Incompatible;
         }
 
@@ -2634,6 +2659,9 @@ fn gen_branch_stub(
     for &reg in caller_saved_temp_regs().iter() {
         asm.cpush(reg);
     }
+    // Also save C_RET_REG, used by gen_leave()
+    asm.cpush(C_RET_OPND);
+    asm.cpush(C_RET_OPND);
 
     // Spill temps to the VM stack as well for jit.peek_at_stack()
     asm.spill_temps();
@@ -2681,14 +2709,20 @@ pub fn gen_branch_stub_hit_trampoline(ocb: &mut OutlinedCb) -> CodePtr {
             EC,
         ]
     );
+    let jump_addr2 = asm.add(jump_addr, 0.into());
 
+    // Restore return reg
+    asm.cpop_into(C_RET_OPND);
+    asm.cpop_into(C_RET_OPND);
     // Restore caller-saved registers for stack temps
     for &reg in caller_saved_temp_regs().iter().rev() {
         asm.cpop_into(reg);
     }
 
     // Jump to the address returned by the branch_stub_hit() call
-    asm.jmp_opnd(jump_addr);
+    asm.jmp_opnd(jump_addr2);
+
+    asm.test(jump_addr, 0usize.into());
 
     asm.compile(ocb, None);
 
@@ -2829,16 +2863,13 @@ pub fn defer_compilation(
     asm: &mut Assembler,
     ocb: &mut OutlinedCb,
 ) {
-    if asm.ctx.chain_depth != 0 {
+    if asm.ctx.get_chain_depth() != 0 {
         panic!("Double defer!");
     }
 
     let mut next_ctx = asm.ctx.clone();
 
-    if next_ctx.chain_depth == u8::MAX {
-        panic!("max block version chain depth reached!");
-    }
-    next_ctx.chain_depth += 1;
+    next_ctx.increment_chain_depth();
 
     let branch = new_pending_branch(jit, BranchGenFn::JumpToTarget0(Cell::new(BranchShape::Default)));
 

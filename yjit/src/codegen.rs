@@ -887,6 +887,18 @@ pub fn gen_single_block(
         asm_comment!(asm, "reg_temps: {:08b}", asm.ctx.get_reg_temps().as_u8());
     }
 
+    if asm.ctx.is_return_landing() {
+        // Continuation of the end of gen_leave().
+        // Reload REG_SP for the current frame and transfer the return value
+        // to the stack top.
+        asm.mov(SP, Opnd::mem(64, CFP, RUBY_OFFSET_CFP_SP));
+
+        let top = asm.stack_push(Type::Unknown);
+        asm.mov(top, C_RET_OPND);
+
+        asm.ctx.clear_return_landing();
+    }
+
     // For each instruction to compile
     // NOTE: could rewrite this loop with a std::iter::Iterator
     while insn_idx < iseq_size {
@@ -5261,7 +5273,10 @@ fn gen_push_frame(
     if let Some(iseq) = frame.iseq {
         asm.mov(cfp_opnd(RUBY_OFFSET_CFP_SP), sp);
         asm.mov(cfp_opnd(RUBY_OFFSET_CFP_ISEQ), VALUE::from(iseq).into());
+    } else {
+        asm.mov(cfp_opnd(RUBY_OFFSET_CFP_SP), 0xccccccccccccccccusize.into());
     }
+
     asm.mov(cfp_opnd(RUBY_OFFSET_CFP_SELF), frame.recv);
     asm.mov(cfp_opnd(RUBY_OFFSET_CFP_BLOCK_CODE), 0.into());
 
@@ -6578,17 +6593,14 @@ fn gen_send_iseq(
     // The callee might change locals through Kernel#binding and other means.
     asm.ctx.clear_local_types();
 
-    // Pop arguments and receiver in return context, push the return value
-    // After the return, sp_offset will be 1. The codegen for leave writes
-    // the return value in case of JIT-to-JIT return.
+    // Pop arguments and receiver in return context and
+    // mark it as a continuation of gen_leave()
     let mut return_asm = Assembler::new();
     return_asm.ctx = asm.ctx.clone();
     return_asm.stack_pop(sp_offset.try_into().unwrap());
-    let return_val = return_asm.stack_push(Type::Unknown);
-    // The callee writes a return value on stack. Update reg_temps accordingly.
-    return_asm.ctx.dealloc_temp_reg(return_val.stack_idx());
-    return_asm.ctx.set_sp_offset(1);
+    return_asm.ctx.set_sp_offset(0); // We set SP on the caller's frame above
     return_asm.ctx.reset_chain_depth();
+    return_asm.ctx.set_as_return_landing();
 
     // Write the JIT return address on the callee frame
     gen_branch(
@@ -7790,11 +7802,6 @@ fn gen_leave(
 
     // Move the return value into the C return register for gen_leave_exit()
     asm.mov(C_RET_OPND, retval_opnd);
-
-    // Reload REG_SP for the caller and write the return value.
-    // Top of the stack is REG_SP[0] since the caller has sp_offset=1.
-    asm.mov(SP, Opnd::mem(64, CFP, RUBY_OFFSET_CFP_SP));
-    asm.mov(Opnd::mem(64, SP, 0), C_RET_OPND);
 
     // Jump to the JIT return address on the frame that was just popped
     let offset_to_jit_return =
