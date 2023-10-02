@@ -2518,6 +2518,9 @@ fn branch_stub_hit_body(branch_ptr: *const c_void, target_idx: u32, ec: EcPtr) -
         let running_iseq = rb_cfp_get_iseq(cfp);
         let reconned_pc = rb_iseq_pc_at_idx(running_iseq, target_blockid.idx.into());
         let reconned_sp = rb_vm_base_ptr(cfp).add(target_ctx.stack_size.into());
+        // Unlike in the interpreter, our `leave` doesn't write to the caller's
+        // SP—we do it in the returned-to code. Account for this difference.
+        let reconned_sp = reconned_sp.add(target_ctx.is_return_landing().into());
 
         assert_eq!(running_iseq, target_blockid.iseq as _, "each stub expects a particular iseq");
 
@@ -2653,6 +2656,12 @@ fn gen_branch_stub(
     asm.ctx = ctx.clone();
     asm.set_reg_temps(ctx.reg_temps);
     asm_comment!(asm, "branch stub hit");
+
+    if asm.ctx.is_return_landing() {
+        asm.mov(SP, Opnd::mem(64, CFP, RUBY_OFFSET_CFP_SP));
+        let top = asm.stack_push(Type::Unknown);
+        asm.mov(top, C_RET_OPND);
+    }
 
     // Save caller-saved registers before C_ARG_OPNDS get clobbered.
     // Spill all registers for consistency with the trampoline.
