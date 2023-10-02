@@ -2718,7 +2718,7 @@ pub fn gen_branch_stub_hit_trampoline(ocb: &mut OutlinedCb) -> CodePtr {
             EC,
         ]
     );
-    let jump_addr2 = asm.add(jump_addr, 0.into());
+    let jump_addr2 = asm.load(jump_addr);
 
     // Restore return reg
     asm.cpop_into(C_RET_OPND);
