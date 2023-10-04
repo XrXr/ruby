@@ -826,22 +826,25 @@ typedef struct rb_control_frame_struct {
     const VALUE *ep;           // cfp[4] / block[1]
     const void *block_code;    // cfp[5] / block[2] -- iseq, ifunc, or forwarded block handler
     void *jit_return;          // cfp[6] -- return address for JIT code
-    rb_jit_frame_t *jit_frame; // cfp[7]
 #if VM_DEBUG_BP_CHECK
     VALUE *bp_check;           // cfp[8]
 #endif
 } rb_control_frame_t;
 
-#define ASSERT_FRAME_MATERIALIZED(cfp) RUBY_ASSERT(! (cfp)->jit_frame)
+#define JIT_FRAME_P(cfp) (((VALUE)(cfp)->_pc) & 1)
 
-#define JIT_FRAME_CFRAME_P(cfp) (VM_FRAME_MAGIC_CFUNC == ((cfp)->jit_frame->flags & VM_FRAME_MAGIC_MASK))
+#define JIT_FRAME(cfp) ((const rb_jit_frame_t *)(((VALUE)(cfp)->_pc) - 1))
 
-#define CFP_PC(cfp) ((cfp)->jit_frame ? (cfp)->jit_frame->pc : (cfp)->_pc)
+#define ASSERT_FRAME_MATERIALIZED(cfp) RUBY_ASSERT(! JIT_FRAME_P(cfp))
+
+#define JIT_FRAME_CFRAME_P(cfp) (VM_FRAME_MAGIC_CFUNC == (JIT_FRAME(cfp)->flags & VM_FRAME_MAGIC_MASK))
+
+#define CFP_PC(cfp) (JIT_FRAME_P(cfp) ? JIT_FRAME(cfp)->pc : (cfp)->_pc)
 
 VALUE *rb_vm_jit_frame_sp(const rb_control_frame_t *cfp);
-#define CFP_SP(cfp) (((cfp)->jit_frame) ? rb_vm_jit_frame_sp(cfp) : (cfp)->_sp)
+#define CFP_SP(cfp) (JIT_FRAME_P(cfp) ? rb_vm_jit_frame_sp(cfp) : (cfp)->_sp)
 
-#define CFP_ISEQ(cfp) (((cfp)->jit_frame && JIT_FRAME_CFRAME_P(cfp)) ? 0 : (cfp)->_iseq)
+#define CFP_ISEQ(cfp) ((JIT_FRAME_P(cfp) && JIT_FRAME_CFRAME_P(cfp)) ? 0 : (cfp)->_iseq)
 
 extern const rb_data_type_t ruby_threadptr_data_type;
 
@@ -1334,11 +1337,12 @@ VM_FRAME_BMETHOD_P(const rb_control_frame_t *cfp)
 static inline void
 rb_vm_cfp_materialize(rb_control_frame_t *cfp)
 {
-    if (cfp->jit_frame) {
-        cfp->_pc = CFP_PC(cfp);
+    if (JIT_FRAME_P(cfp)) {
         cfp->_sp = CFP_SP(cfp);
-        if (cfp->jit_frame->flags & VM_FRAME_FLAG_CFRAME) cfp->_iseq = 0;
-        cfp->jit_frame = NULL;
+        if (JIT_FRAME(cfp)->flags & VM_FRAME_FLAG_CFRAME) cfp->_iseq = 0;
+        // This needs to be the last thought as setting the actual PC
+        // makes this no longer a jit frame
+        cfp->_pc = CFP_PC(cfp);
     }
 }
 

@@ -274,7 +274,6 @@ fn jit_save_pc(jit: &JITState, asm: &mut Assembler) {
 
     asm_comment!(asm, "save PC to CFP");
     asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_PC), Opnd::const_ptr(ptr as *const u8));
-    //asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
 }
 
 /// For calling routines in the middle of a YARV instruction that will
@@ -322,7 +321,7 @@ fn jit_bump_progress(jit: &mut JITState, asm: &mut Assembler) {
         sp_offset: asm.ctx.get_stack_size().into(),
         flags: VALUE(0),
     }.move_to_heap();
-    asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), Opnd::const_ptr(jit_frame as _));
+    asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_PC), (jit_frame as usize + 1).into());
 }
 
 /// Record the current codeblock write position for rewriting into a jump into
@@ -461,12 +460,6 @@ fn gen_exit(exit_pc: *mut VALUE, asm: &mut Assembler) {
 
     // Spill stack temps before returning to the interpreter
     asm.spill_temps();
-
-    // TODO: Call the materialize function
-    asm.mov(
-        Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME),
-        Opnd::const_ptr(0 as *const u8)
-    );
 
     // Generate the code to exit to the interpreters
     // Write the adjusted SP back into the CFP
@@ -5298,9 +5291,7 @@ fn gen_push_frame(
             sp_offset: VM_ENV_DATA_SIZE as i32 + frame.cfunc_args_and_self,
             flags: VALUE(frame.frame_type.as_usize()),
         }.move_to_heap();
-        asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), Opnd::const_ptr(cframe_jit_frame as _));
-    } else {
-        asm.mov(cfp_opnd(RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
+        asm.mov(cfp_opnd(RUBY_OFFSET_CFP_PC), (cframe_jit_frame as usize + 1).into());
     }
 
     // Spill stack temps to let the callee use them (must be done before changing SP)
@@ -6529,16 +6520,15 @@ fn gen_send_iseq(
     let sp_offset = (argc as isize) + if captured_self { 0 } else { 1 };
 
     // Store the updated SP on the current frame (pop arguments and receiver)
+    // This helps with reconstructing interpreter state when we need to side exit.
+    // Normal JIT-to-JIT return also read from this SP field.
     asm_comment!(asm, "store caller sp");
     let caller_sp = asm.lea(asm.ctx.sp_opnd((SIZEOF_VALUE as isize) * -sp_offset));
     asm.store(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_SP), caller_sp);
 
-    // Store the next PC in the current frame
+    // Store the next PC in the current frame.
+    // Becuse the PC is not tagged, this also makes the caller frame not a JIT frame.
     jit_save_pc(jit, asm);
-    // TODO(outline): ^^^^ this and the sp motion above should become a jit_progress_bump() later
-    //               but it's hard because gen_leave() reads from cfp->_sp directly to restore
-    //               REG_SP when callee pops
-    asm.mov(Opnd::mem(64, CFP, RUBY_OFFSET_CFP_JIT_FRAME), 0.into());
 
     // Adjust the callee's stack pointer
     let offs = (SIZEOF_VALUE as isize) * (

@@ -1065,7 +1065,6 @@ module RubyVM::RJIT # :nodoc: all
       ep: [CType::Pointer.new { self.VALUE }, Primitive.cexpr!("OFFSETOF((*((struct rb_control_frame_struct *)NULL)), ep)")],
       block_code: [CType::Immediate.parse("void *"), Primitive.cexpr!("OFFSETOF((*((struct rb_control_frame_struct *)NULL)), block_code)")],
       jit_return: [CType::Pointer.new { CType::Immediate.parse("void") }, Primitive.cexpr!("OFFSETOF((*((struct rb_control_frame_struct *)NULL)), jit_return)")],
-      jit_frame: [CType::Pointer.new { self.rb_jit_frame_t }, Primitive.cexpr!("OFFSETOF((*((struct rb_control_frame_struct *)NULL)), jit_frame)")],
     )
   end
 

@@ -383,7 +383,6 @@ vm_push_frame(rb_execution_context_t *ec,
         .ep         = sp - 1,
         .block_code = NULL,
         .jit_return = NULL,
-        .jit_frame  = NULL,
 #if VM_DEBUG_BP_CHECK
         .bp_check   = sp,
 #endif
@@ -2504,7 +2503,7 @@ rb_vm_jit_frame_sp(const rb_control_frame_t *cfp)
 {
     // Sum offsets of all jit frames
     ptrdiff_t tally = 0;
-    while (cfp->jit_frame) {
+    while (JIT_FRAME_P(cfp)) {
         if (CFP_ISEQ(cfp)) {
             tally += ISEQ_BODY(CFP_ISEQ(cfp))->local_table_size + VM_ENV_DATA_SIZE;
             if (ISEQ_BODY(CFP_ISEQ(cfp))->type == ISEQ_TYPE_METHOD || VM_FRAME_BMETHOD_P(cfp)) {
@@ -2512,7 +2511,7 @@ rb_vm_jit_frame_sp(const rb_control_frame_t *cfp)
                 tally += 1;
             }
         }
-        tally += cfp->jit_frame->sp_offset;
+        tally += JIT_FRAME(cfp)->sp_offset;
         cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
     }
     return cfp->_sp + tally;
