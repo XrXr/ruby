@@ -773,7 +773,12 @@ rb_get_ec_cfp(const rb_execution_context_t *ec)
 const rb_iseq_t *
 rb_get_cfp_iseq(struct rb_control_frame_struct *cfp)
 {
-    return CFP_ISEQ(cfp);
+    // this is only used for stubs.
+    // - for entry stub, the interpreter pushes a materialized frame
+    // - for branch stubs, we don't set PC when pushing ISEQs, which branch_stub_hit() observes (other normal runtime functions
+    // are called after we bump progress)
+    //   TODO(outline): this will need to change once we outline the iseq field for ISeq frames
+    return cfp->_iseq;
 }
 
 VALUE *
@@ -791,22 +796,13 @@ rb_get_cfp_sp(struct rb_control_frame_struct *cfp)
 void
 rb_set_cfp_pc(struct rb_control_frame_struct *cfp, const VALUE *pc)
 {
-    rb_vm_cfp_materialize(cfp);
     cfp->_pc = pc;
 }
 
 void
 rb_set_cfp_sp(struct rb_control_frame_struct *cfp, VALUE *sp)
 {
-    rb_vm_cfp_materialize(cfp);
     cfp->_sp = sp;
-}
-
-rb_iseq_t *
-rb_cfp_get_iseq(struct rb_control_frame_struct *cfp)
-{
-    // TODO(alan) could assert frame type here to make sure that it's a ruby frame with an iseq.
-    return (rb_iseq_t*)CFP_ISEQ(cfp);
 }
 
 VALUE

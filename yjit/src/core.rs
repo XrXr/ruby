@@ -2515,17 +2515,18 @@ fn branch_stub_hit_body(branch_ptr: *const c_void, target_idx: u32, ec: EcPtr) -
         let cfp = get_ec_cfp(ec);
         let original_interp_sp = get_cfp_sp(cfp);
 
-        let running_iseq = rb_cfp_get_iseq(cfp);
+        let running_iseq = get_cfp_iseq(cfp);
         let reconned_pc = rb_iseq_pc_at_idx(running_iseq, target_blockid.idx.into());
+        assert_eq!(running_iseq, target_blockid.iseq as _, "each stub expects a particular iseq");
+
+        // Update the PC in the current CFP, because it may be out of sync in JITted code
+        // Also normalizes to a non-JIT frame.
+        rb_set_cfp_pc(cfp, reconned_pc);
+
         let reconned_sp = rb_vm_base_ptr(cfp).add(target_ctx.stack_size.into());
         // Unlike in the interpreter, our `leave` doesn't write to the caller's
         // SP—we do it in the returned-to code. Account for this difference.
         let reconned_sp = reconned_sp.add(target_ctx.is_return_landing().into());
-
-        assert_eq!(running_iseq, target_blockid.iseq as _, "each stub expects a particular iseq");
-
-        // Update the PC in the current CFP, because it may be out of sync in JITted code
-        rb_set_cfp_pc(cfp, reconned_pc);
 
         // :stub-sp-flush:
         // Generated code do stack operations without modifying cfp->sp, while the

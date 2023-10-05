@@ -5286,6 +5286,7 @@ fn gen_push_frame(
 
     // Set cfp->jit_frame for C frames
     if frame.iseq.is_none() {
+        asm_comment!(asm, "outlined C frame");
         let cframe_jit_frame = rb_jit_frame_t {
             pc: ptr::null_mut(),
             sp_offset: VM_ENV_DATA_SIZE as i32 + frame.cfunc_args_and_self,
