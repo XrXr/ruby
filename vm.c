@@ -442,10 +442,11 @@ jit_compile_exception(rb_execution_context_t *ec)
     // Increment the ISEQ's call counter and trigger JIT compilation if not compiled
     if (body->jit_exception == NULL) {
         body->jit_exception_calls++;
-        if (rb_yjit_threshold_hit(iseq, body->jit_exception_calls)) {
+        if (body->jit_exception_calls == rb_yjit_call_threshold()) {
             rb_yjit_compile_iseq(iseq, ec, true);
         }
     }
+
     return body->jit_exception;
 }
 
@@ -1751,6 +1752,17 @@ void
 rb_lastline_set(VALUE val)
 {
     vm_svar_set(GET_EC(), VM_SVAR_LASTLINE, val);
+}
+
+void
+rb_lastline_set_up(VALUE val, unsigned int up)
+{
+    rb_control_frame_t * cfp = GET_EC()->cfp;
+
+    for(unsigned int i = 0; i < up; i++) {
+        cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
+    }
+    vm_cfp_svar_set(GET_EC(), cfp, VM_SVAR_LASTLINE, val);
 }
 
 /* misc */

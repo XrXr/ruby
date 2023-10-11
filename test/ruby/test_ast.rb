@@ -283,6 +283,27 @@ class TestAst < Test::Unit::TestCase
     assert_parse("begin rescue; ensure; defined? retry; end")
     assert_parse("END {defined? retry}")
     assert_parse("begin rescue; END {defined? retry}; end")
+
+    assert_parse("#{<<-"begin;"}\n#{<<-'end;'}")
+    begin;
+      def foo
+        begin
+          yield
+        rescue StandardError => e
+          begin
+            puts "hi"
+            retry
+          rescue
+            retry unless e
+            raise e
+          else
+            retry
+          ensure
+            retry
+          end
+        end
+      end
+    end;
   end
 
   def test_invalid_yield
@@ -291,11 +312,13 @@ class TestAst < Test::Unit::TestCase
     assert_invalid_parse(msg, "class C; yield; end")
     assert_invalid_parse(msg, "BEGIN {yield}")
     assert_invalid_parse(msg, "END {yield}")
+    assert_invalid_parse(msg, "-> {yield}")
 
     assert_invalid_parse(msg, "yield true")
     assert_invalid_parse(msg, "class C; yield true; end")
     assert_invalid_parse(msg, "BEGIN {yield true}")
     assert_invalid_parse(msg, "END {yield true}")
+    assert_invalid_parse(msg, "-> {yield true}")
 
     assert_parse("!defined?(yield)")
     assert_parse("class C; defined?(yield); end")
