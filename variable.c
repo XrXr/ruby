@@ -1372,37 +1372,43 @@ rb_attr_delete(VALUE obj, ID id)
 
 static void
 ivar_pinner_mark(void *data) {
-    if (data) {
-        VALUE obj = (VALUE)data;
-        RUBY_ASSERT(!rb_shape_obj_too_complex(obj));
-        rb_gc_mark(obj);
+    if (!data) {
+        return;
+    }
 
-        if (FL_TEST(obj, FL_EXIVAR)) {
-            struct gen_ivtbl *ivtbl;
+    VALUE obj = (VALUE)data;
+    if (rb_shape_obj_too_complex(obj)) {
+        // The object was evacuated, our job is done.
+        return;
+    }
 
-            if (rb_gen_ivtbl_get(obj, 0, &ivtbl)) {
-                for (uint32_t i = 0; i < ivtbl->as.shape.numiv; i++) {
-                    rb_gc_mark((VALUE)&ivtbl->as.shape.ivptr[i]);
-                }
+    rb_gc_mark(obj);
+
+    if (FL_TEST(obj, FL_EXIVAR)) {
+        struct gen_ivtbl *ivtbl;
+
+        if (rb_gen_ivtbl_get(obj, 0, &ivtbl)) {
+            for (uint32_t i = 0; i < ivtbl->as.shape.numiv; i++) {
+                rb_gc_mark(ivtbl->as.shape.ivptr[i]);
             }
-            return;
         }
+        return;
+    }
 
-        switch (BUILTIN_TYPE(obj)) {
-          case T_CLASS:
-          case T_MODULE:
-            for (attr_index_t i = 0; i < RCLASS_IV_COUNT(obj); i++) {
-                rb_gc_mark(RCLASS_IVPTR(obj)[i]);
-            }
-            break;
-          case T_OBJECT:
-            for (attr_index_t i = 0; i < ROBJECT_IV_COUNT(obj); i++) {
-                rb_gc_mark(ROBJECT_IVPTR(obj)[i]);
-            }
-            break;
-          default:
-            break;
+    switch (BUILTIN_TYPE(obj)) {
+      case T_CLASS:
+      case T_MODULE:
+        for (attr_index_t i = 0; i < RCLASS_IV_COUNT(obj); i++) {
+            rb_gc_mark(RCLASS_IVPTR(obj)[i]);
         }
+        break;
+      case T_OBJECT:
+        for (attr_index_t i = 0; i < ROBJECT_IV_COUNT(obj); i++) {
+            rb_gc_mark(ROBJECT_IVPTR(obj)[i]);
+        }
+        break;
+      default:
+        break;
     }
 }
 
@@ -1430,23 +1436,25 @@ rb_evict_ivars_to_hash(VALUE obj, rb_shape_t * shape)
 
     // Evacuate all previous values from shape into id_table
     rb_ivar_foreach(obj, rb_obj_evacuate_ivs_to_hash_table, (st_data_t)table);
+    void *old_ptr = NULL;
 
     switch (BUILTIN_TYPE(obj)) {
       case T_OBJECT:
-        rb_shape_set_too_complex(obj);
-
         if (!(RBASIC(obj)->flags & ROBJECT_EMBED)) {
-            xfree(ROBJECT(obj)->as.heap.ivptr);
+            old_ptr = ROBJECT(obj)->as.heap.ivptr;
         }
 
+        rb_shape_set_too_complex(obj);
         ROBJECT_SET_IV_HASH(obj, table);
+
         break;
       case T_CLASS:
       case T_MODULE:
-        rb_shape_set_too_complex(obj);
+        old_ptr = RCLASS_IVPTR(obj);
 
-        xfree(RCLASS_IVPTR(obj));
+        rb_shape_set_too_complex(obj);
         RCLASS_SET_IV_HASH(obj, table);
+
         break;
       default:
         RB_VM_LOCK_ENTER();
@@ -1473,6 +1481,9 @@ rb_evict_ivars_to_hash(VALUE obj, rb_shape_t * shape)
     }
 
     RTYPEDDATA_DATA(ivar_pinner) = NULL;
+    if (old_ptr) {
+        xfree(old_ptr);
+    }
     RUBY_ASSERT(rb_shape_obj_too_complex(obj));
 }
 

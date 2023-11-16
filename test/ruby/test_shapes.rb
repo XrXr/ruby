@@ -306,6 +306,69 @@ class TestShapes < Test::Unit::TestCase
     end;
   end
 
+
+  def test_evacuate_generic_ivar_and_compaction
+    assert_separately([], "#{<<~"begin;"}\n#{<<~'end;'}")
+
+    begin;
+      count = 20
+
+      c = Hash.new
+      count.times do |ivar|
+        c.instance_variable_set("@i#{ivar}", "ivar-#{ivar}")
+      end
+
+      i = 0
+      while RubyVM::Shape.shapes_available > 0
+        o = Class.new
+        o.instance_variable_set("@i#{i}", 1)
+        i += 1
+      end
+
+      GC.auto_compact = true
+      GC.stress = true
+
+      # Cause evacuation
+      c.instance_variable_set(:@a, o = Object.new)
+      assert_equal(o, c.instance_variable_get(:@a))
+
+      count.times do |ivar|
+        assert_equal "ivar-#{ivar}", c.instance_variable_get("@i#{ivar}")
+      end
+    end;
+  end
+
+  def test_evacuate_object_ivar_and_compaction
+    assert_separately([], "#{<<~"begin;"}\n#{<<~'end;'}")
+
+    begin;
+      count = 20
+
+      c = Object.new
+      count.times do |ivar|
+        c.instance_variable_set("@i#{ivar}", "ivar-#{ivar}")
+      end
+
+      i = 0
+      while RubyVM::Shape.shapes_available > 0
+        o = Class.new
+        o.instance_variable_set("@i#{i}", 1)
+        i += 1
+      end
+
+      GC.auto_compact = true
+      GC.stress = true
+
+      # Cause evacuation
+      c.instance_variable_set(:@a, o = Object.new)
+      assert_equal(o, c.instance_variable_get(:@a))
+
+      count.times do |ivar|
+        assert_equal "ivar-#{ivar}", c.instance_variable_get("@i#{ivar}")
+      end
+    end;
+  end
+
   def test_run_out_of_shape_for_module_ivar
     assert_separately([], "#{<<~"begin;"}\n#{<<~'end;'}")
     begin;
