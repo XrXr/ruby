@@ -1370,10 +1370,61 @@ rb_attr_delete(VALUE obj, ID id)
     return rb_ivar_delete(obj, id, Qnil);
 }
 
+static void
+ivar_pinner_mark(void *data) {
+    if (data) {
+        VALUE obj = (VALUE)data;
+        RUBY_ASSERT(!rb_shape_obj_too_complex(obj));
+        rb_gc_mark(obj);
+
+        if (FL_TEST(obj, FL_EXIVAR)) {
+            struct gen_ivtbl *ivtbl;
+
+            if (rb_gen_ivtbl_get(obj, 0, &ivtbl)) {
+                for (uint32_t i = 0; i < ivtbl->as.shape.numiv; i++) {
+                    rb_gc_mark((VALUE)&ivtbl->as.shape.ivptr[i]);
+                }
+            }
+            return;
+        }
+
+        switch (BUILTIN_TYPE(obj)) {
+          case T_CLASS:
+          case T_MODULE:
+            for (attr_index_t i = 0; i < RCLASS_IV_COUNT(obj); i++) {
+                rb_gc_mark(RCLASS_IVPTR(obj)[i]);
+            }
+            break;
+          case T_OBJECT:
+            for (attr_index_t i = 0; i < ROBJECT_IV_COUNT(obj); i++) {
+                rb_gc_mark(ROBJECT_IVPTR(obj)[i]);
+            }
+            break;
+          default:
+            break;
+        }
+    }
+}
+
+static const rb_data_type_t ivars_pinner_data_type = {
+    .wrap_struct_name = "ivar_pinner",
+    .function = {
+        .dmark = ivar_pinner_mark,
+        .dfree = NULL,
+        .dsize = NULL,
+        .dcompact = NULL,
+    },
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY | RUBY_TYPED_WB_PROTECTED,
+};
+
 void
 rb_evict_ivars_to_hash(VALUE obj, rb_shape_t * shape)
 {
     RUBY_ASSERT(!rb_shape_obj_too_complex(obj));
+
+    // We while we're copying ivars into the table, we must ensure they remain
+    // pinned, otherwise compaction could corrupt the resulting st_table.
+    VALUE ivar_pinner = TypedData_Wrap_Struct(0, &ivars_pinner_data_type, (void *)obj);
 
     st_table *table = st_init_numtable_with_size(shape->next_iv_index);
 
@@ -1421,6 +1472,7 @@ rb_evict_ivars_to_hash(VALUE obj, rb_shape_t * shape)
         RB_VM_LOCK_LEAVE();
     }
 
+    RTYPEDDATA_DATA(ivar_pinner) = NULL;
     RUBY_ASSERT(rb_shape_obj_too_complex(obj));
 }
 
