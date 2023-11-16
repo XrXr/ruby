@@ -1423,19 +1423,34 @@ static const rb_data_type_t ivars_pinner_data_type = {
     .flags = RUBY_TYPED_FREE_IMMEDIATELY | RUBY_TYPED_WB_PROTECTED,
 };
 
+struct rb_evacuate_arg {
+    st_table *table;
+    VALUE host;
+};
+
+static int
+evict_ivars_to_hash_i(ID key, VALUE val, st_data_t arg)
+{
+    struct rb_evacuate_arg *evac_arg = (struct rb_evacuate_arg *)arg;
+    st_insert(evac_arg->table, (st_data_t)key, (st_data_t)val);
+    RB_OBJ_WRITTEN(evac_arg->host, Qundef, val);
+    return ST_CONTINUE;
+}
+
 void
 rb_evict_ivars_to_hash(VALUE obj, rb_shape_t * shape)
 {
     RUBY_ASSERT(!rb_shape_obj_too_complex(obj));
 
-    // We while we're copying ivars into the table, we must ensure they remain
-    // pinned, otherwise compaction could corrupt the resulting st_table.
-    VALUE ivar_pinner = TypedData_Wrap_Struct(0, &ivars_pinner_data_type, (void *)obj);
-
+    //
     st_table *table = st_init_numtable_with_size(shape->next_iv_index);
+    VALUE ivar_pinner = rb_wb_protected_newobj_of(GET_EC(), rb_cBasicObject, T_OBJECT | ROBJECT_EMBED, RVALUE_SIZE); // hidden
+    rb_shape_set_too_complex(ivar_pinner);
+    ROBJECT_SET_IV_HASH(ivar_pinner, table);
 
     // Evacuate all previous values from shape into id_table
-    rb_ivar_foreach(obj, rb_obj_evacuate_ivs_to_hash_table, (st_data_t)table);
+    struct rb_evacuate_arg evac_arg = { .table = table, .host = ivar_pinner };
+    rb_ivar_foreach(obj, evict_ivars_to_hash_i, (st_data_t)&evac_arg);
     void *old_ptr = NULL;
 
     switch (BUILTIN_TYPE(obj)) {
@@ -1480,7 +1495,8 @@ rb_evict_ivars_to_hash(VALUE obj, rb_shape_t * shape)
         RB_VM_LOCK_LEAVE();
     }
 
-    RTYPEDDATA_DATA(ivar_pinner) = NULL;
+    // done with pinning, now set pinner to 0 ivars
+    rb_shape_set_shape(ivar_pinner, rb_shape_get_root_shape());
     if (old_ptr) {
         xfree(old_ptr);
     }
