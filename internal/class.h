@@ -120,12 +120,25 @@ RCLASS_IV_HASH(VALUE obj)
     return (st_table *)RCLASS_IVPTR(obj);
 }
 
+#if RUBY_DEBUG
+static int
+check_bad_obj_i(st_data_t id, st_data_t val, st_data_t data)
+{
+    RUBY_ASSERT(!RB_TYPE_P(val, T_NONE));
+    RUBY_ASSERT(!RB_TYPE_P(val, T_MOVED));
+    return ST_CONTINUE;
+}
+#endif
+
 static inline void
 RCLASS_SET_IV_HASH(VALUE obj, const st_table *tbl)
 {
     RUBY_ASSERT(RB_TYPE_P(obj, RUBY_T_CLASS) || RB_TYPE_P(obj, RUBY_T_MODULE));
     RUBY_ASSERT(rb_shape_obj_too_complex(obj));
     RCLASS_IVPTR(obj) = (VALUE *)tbl;
+#if RUBY_DEBUG
+    rb_st_foreach(RCLASS_IV_HASH(obj), &check_bad_obj_i, 0);
+#endif
 }
 
 static inline uint32_t
