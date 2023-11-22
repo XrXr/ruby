@@ -126,6 +126,7 @@ check_bad_obj_i(st_data_t id, st_data_t val, st_data_t data)
 {
     RUBY_ASSERT(!RB_TYPE_P(val, T_NONE));
     RUBY_ASSERT(!RB_TYPE_P(val, T_MOVED));
+    RUBY_ASSERT(rb_gc_is_ptr_to_obj((void *)val));
     RUBY_ASSERT(!rb_objspace_garbage_object_p(val));
     return ST_CONTINUE;
 }
