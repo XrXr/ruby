@@ -5650,7 +5650,8 @@ fn gen_send_cfunc(
 
     match block_arg_type {
         Some(Type::Nil | Type::BlockParamProxy) => {
-            // We'll handle this later
+            // We don't need the actual stack value for these
+            asm.stack_pop(1);
         }
         None => {
             // Nothing to do
@@ -5658,23 +5659,6 @@ fn gen_send_cfunc(
         _ => {
             gen_counter_incr(asm, Counter::send_cfunc_block_arg);
             return None;
-        }
-    }
-
-    match block_arg_type {
-        Some(Type::Nil) => {
-            // We have a nil block arg, so let's pop it off the args
-            asm.stack_pop(1);
-        }
-        Some(Type::BlockParamProxy) => {
-            // We don't need the actual stack value
-            asm.stack_pop(1);
-        }
-        None => {
-            // Nothing to do
-        }
-        _ => {
-            assert!(false);
         }
     }
 
