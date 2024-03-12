@@ -2522,6 +2522,19 @@ vm_exec_bottom_rescue(void *context)
 }
 #endif
 
+static void
+scan_for_canary(rb_execution_context_t *ec) {
+    for (VALUE *sp = ec->cfp->sp; sp < (VALUE *)ec->cfp; sp++) {
+        if (sp[0] == vm_stack_canary) {
+            vm_check_canary(ec, sp);
+        }
+    }
+}
+
+void rb_scan_for_canary(rb_execution_context_t *ec) {
+    scan_for_canary(ec);
+}
+
 VALUE
 vm_exec(rb_execution_context_t *ec)
 {
@@ -2549,8 +2562,9 @@ vm_exec(rb_execution_context_t *ec)
     enum ruby_tag_type state;
     if ((state = EC_EXEC_TAG()) == TAG_NONE) {
         if (UNDEF_P(result = jit_exec(ec))) {
+            scan_for_canary(ec);
             result = vm_exec_core(ec);
-        }
+        } else scan_for_canary(ec);
         /* fallback to the VM */
         result = vm_exec_loop(ec, TAG_NONE, &_tag, result);
     }
@@ -2576,8 +2590,9 @@ vm_exec_loop(rb_execution_context_t *ec, enum ruby_tag_type state,
         // caught a jump, exec the handler. JIT code in jit_exec_exception()
         // may return Qundef to run remaining frames with vm_exec_core().
         if (UNDEF_P(result = jit_exec_exception(ec))) {
+            scan_for_canary(ec);
             result = vm_exec_core(ec);
-        }
+        } else scan_for_canary(ec);
       vm_loop_start:
         VM_ASSERT(ec->tag == tag);
         /* when caught `throw`, `tag.state` is set. */
