@@ -3002,6 +3002,7 @@ vm_callee_setup_arg(rb_execution_context_t *ec, struct rb_calling_info *calling,
     //   => type
     //
     if (ISEQ_BODY(iseq)->param.flags.forwardable) {
+        RUBY_ASSERT_ALWAYS(vm_ci_markable(ci));
         argv[param_size - 2] = 0xCAFEF00D;
         argv[param_size - 1] = (VALUE)ci;
         return 0;
@@ -5733,7 +5734,13 @@ vm_sendish(
     const struct rb_callinfo *ci = cd->ci;
     const struct rb_callcache *cc;
     int argc = vm_ci_argc(ci);
+
     VALUE recv = TOPN(argc);
+
+    if (vm_ci_flag(cd->ci) & VM_CALL_FORWARDING) {
+        recv = TOPN(1);
+    }
+
     struct rb_calling_info calling = {
         .block_handler = block_handler,
         .kw_splat = IS_ARGS_KW_SPLAT(ci) > 0,
