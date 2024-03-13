@@ -26,6 +26,7 @@ enum vm_call_flag_bits {
     VM_CALL_OPT_SEND_bit,       // internal flag
     VM_CALL_KW_SPLAT_MUT_bit,   // kw splat hash can be modified (to avoid allocating a new one)
     VM_CALL_ARGS_SPLAT_MUT_bit, // args splat can be modified (to avoid allocating a new one)
+    VM_CALL_FORWARDING_bit,     // m(...)
     VM_CALL__END
 };
 
@@ -42,6 +43,7 @@ enum vm_call_flag_bits {
 #define VM_CALL_OPT_SEND        (0x01 << VM_CALL_OPT_SEND_bit)
 #define VM_CALL_KW_SPLAT_MUT    (0x01 << VM_CALL_KW_SPLAT_MUT_bit)
 #define VM_CALL_ARGS_SPLAT_MUT  (0x01 << VM_CALL_ARGS_SPLAT_MUT_bit)
+#define VM_CALL_FORWARDING      (0x01 << VM_CALL_FORWARDING_bit)
 
 struct rb_callinfo_kwarg {
     int keyword_len;

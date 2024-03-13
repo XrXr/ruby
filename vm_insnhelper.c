@@ -2521,6 +2521,12 @@ vm_base_ptr(const rb_control_frame_t *cfp)
 
     if (cfp->iseq && VM_FRAME_RUBYFRAME_P(cfp)) {
         VALUE *bp = prev_cfp->sp + ISEQ_BODY(cfp->iseq)->local_table_size + VM_ENV_DATA_SIZE;
+
+        if (ISEQ_BODY(cfp->iseq)->param.flags.forwardable) {
+            CALL_INFO ci = (CALL_INFO)cfp->ep[-VM_ENV_DATA_SIZE]; // skip EP stuff, CI should be last local
+            bp += vm_ci_argc(ci);
+        }
+
         if (ISEQ_BODY(cfp->iseq)->type == ISEQ_TYPE_METHOD || VM_FRAME_BMETHOD_P(cfp)) {
             /* adjust `self' */
             bp += 1;
@@ -2589,6 +2595,7 @@ rb_simple_iseq_p(const rb_iseq_t *iseq)
            ISEQ_BODY(iseq)->param.flags.has_kw == FALSE &&
            ISEQ_BODY(iseq)->param.flags.has_kwrest == FALSE &&
            ISEQ_BODY(iseq)->param.flags.accepts_no_kwarg == FALSE &&
+           ISEQ_BODY(iseq)->param.flags.forwardable == FALSE &&
            ISEQ_BODY(iseq)->param.flags.has_block == FALSE;
 }
 
@@ -2601,6 +2608,7 @@ rb_iseq_only_optparam_p(const rb_iseq_t *iseq)
            ISEQ_BODY(iseq)->param.flags.has_kw == FALSE &&
            ISEQ_BODY(iseq)->param.flags.has_kwrest == FALSE &&
            ISEQ_BODY(iseq)->param.flags.accepts_no_kwarg == FALSE &&
+           ISEQ_BODY(iseq)->param.flags.forwardable == FALSE &&
            ISEQ_BODY(iseq)->param.flags.has_block == FALSE;
 }
 
@@ -2612,6 +2620,7 @@ rb_iseq_only_kwparam_p(const rb_iseq_t *iseq)
            ISEQ_BODY(iseq)->param.flags.has_post == FALSE &&
            ISEQ_BODY(iseq)->param.flags.has_kw == TRUE &&
            ISEQ_BODY(iseq)->param.flags.has_kwrest == FALSE &&
+           ISEQ_BODY(iseq)->param.flags.forwardable == FALSE &&
            ISEQ_BODY(iseq)->param.flags.has_block == FALSE;
 }
 
@@ -2974,6 +2983,85 @@ vm_callee_setup_arg(rb_execution_context_t *ec, struct rb_calling_info *calling,
     const struct rb_callcache *cc = calling->cc;
     bool cacheable_ci = vm_ci_markable(ci);
 
+    // Called iseq is using ... param
+    // def foo(...) # <- iseq for foo will have "forwardable"
+    //
+    // We want to set the `...` local to the caller's CI
+    //   foo(1, 2) # <- the ci for this should end up as `...`
+    //
+    // So hopefully the stack looks like:
+    //
+    //   => 1
+    //   => 2
+    //   => *
+    //   => **
+    //   => &
+    //   => ... # <- points at `foo`s CI
+    //   => cref_or_me
+    //   => specval
+    //   => type
+    //
+    if (ISEQ_BODY(iseq)->param.flags.forwardable) {
+        argv[param_size - 2] = 0xCAFEF00D;
+        argv[param_size - 1] = (VALUE)ci;
+        return 0;
+    }
+
+    // This case is when the caller is using a ... parameter.
+    // For example `bar(...)`. The call info will have VM_CALL_FORWARDING
+    // In this case the caller's caller's CI will be on the stack.
+    //
+    // For example:
+    //
+    // def bar(a, b); a + b; end
+    // def foo(...); bar(...); end
+    // foo(1, 2) # <- this CI will be on the stack when we call `bar(...)`
+    //
+    // Stack layout will be:
+    //
+    // > 1
+    // > 2
+    // > CI for foo(1, 2)
+    // > cref_or_me
+    // > specval
+    // > type
+    // > receiver
+    // > CI for foo(1, 2), via `getlocal ...`
+    // >      ( SP points here )
+    if (vm_ci_flag(calling->cd->ci) & VM_CALL_FORWARDING) {
+        const VALUE * lep = VM_CF_LEP(ec->cfp);
+        CALL_INFO callers_info = (CALL_INFO)ec->cfp->sp[-1];
+
+        // We'll need to copy argc args to this SP
+        uint32_t argc = vm_ci_argc(callers_info);
+
+        // Our local storage is below the args we need to copy
+        int local_size = ISEQ_BODY(ec->cfp->iseq)->local_table_size + argc;
+
+        const VALUE * from = lep - (local_size + 2); // 2 for EP values
+
+        MEMCPY(ec->cfp->sp - 1, from, VALUE, argc);
+        ec->cfp->sp += (argc - 1); // -1 because we "popped" the CI
+
+        // Stack layout should now be:
+        //
+        // > 1
+        // > 2
+        // > CI for foo(1, 2)
+        // > cref_or_me
+        // > specval
+        // > type
+        // > receiver
+        // > 1
+        // > 2
+        // >      ( SP points here )
+
+        ci = callers_info;
+        calling->argc = vm_ci_argc(ci);
+        argv = ec->cfp->sp - calling->argc;
+        cacheable_ci = false;
+    }
+
     if (LIKELY(!(vm_ci_flag(ci) & VM_CALL_KW_SPLAT))) {
         if (LIKELY(rb_simple_iseq_p(iseq))) {
             rb_control_frame_t *cfp = ec->cfp;
@@ -2984,7 +3072,7 @@ vm_callee_setup_arg(rb_execution_context_t *ec, struct rb_calling_info *calling,
                 argument_arity_error(ec, iseq, calling->argc, lead_num, lead_num);
             }
 
-            VM_ASSERT(ci == calling->cd->ci);
+            //VM_ASSERT(ci == calling->cd->ci);
             VM_ASSERT(cc == calling->cc);
 
             if (cacheable_ci && vm_call_iseq_optimizable_p(ci, cc)) {
@@ -3081,8 +3169,14 @@ vm_call_iseq_setup(rb_execution_context_t *ec, rb_control_frame_t *cfp, struct r
 
     const struct rb_callcache *cc = calling->cc;
     const rb_iseq_t *iseq = def_iseq_ptr(vm_cc_cme(cc)->def);
-    const int param_size = ISEQ_BODY(iseq)->param.size;
-    const int local_size = ISEQ_BODY(iseq)->local_table_size;
+    int param_size = ISEQ_BODY(iseq)->param.size;
+    int local_size = ISEQ_BODY(iseq)->local_table_size;
+
+    if (ISEQ_BODY(iseq)->param.flags.forwardable) {
+        local_size = local_size + vm_ci_argc(calling->cd->ci);
+        param_size = param_size + vm_ci_argc(calling->cd->ci);
+    }
+
     const int opt_pc = vm_callee_setup_arg(ec, calling, iseq, cfp->sp - calling->argc, param_size, local_size);
     return vm_call_iseq_setup_2(ec, cfp, calling, opt_pc, param_size, local_size);
 }

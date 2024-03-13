@@ -816,7 +816,8 @@ setup_parameters_complex(rb_execution_context_t * const ec, const rb_iseq_t * co
         opt_pc = (int)ISEQ_BODY(iseq)->param.opt_table[opt];
     }
 
-    if (ISEQ_BODY(iseq)->param.flags.has_rest) {
+    if (ISEQ_BODY(iseq)->param.flags.has_rest && !ISEQ_BODY(iseq)->param.flags.forwardable) {
+        // Writes the args array in to the stack
         args_setup_rest_parameter(args, locals + ISEQ_BODY(iseq)->param.rest_start);
         VALUE ary = *(locals + ISEQ_BODY(iseq)->param.rest_start);
         VALUE index = RARRAY_LEN(ary) - 1;

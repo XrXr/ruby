@@ -2108,6 +2108,11 @@ iseq_set_arguments(rb_iseq_t *iseq, LINK_ANCHOR *const optargs, const NODE *cons
         iseq_calc_param_size(iseq);
         body->param.size = arg_size;
 
+        if (args->forwarding) {
+            body->param.flags.forwardable = TRUE;
+            body->param.size += 1;
+        }
+
         if (args->pre_init) { /* m_init */
             NO_CHECK(COMPILE_POPPED(optargs, "init arguments (m)", args->pre_init));
         }
@@ -6295,7 +6300,19 @@ setup_args(rb_iseq_t *iseq, LINK_ANCHOR *const args, const NODE *argn,
         unsigned int dup_rest = 1;
         DECL_ANCHOR(arg_block);
         INIT_ANCHOR(arg_block);
-        NO_CHECK(COMPILE(arg_block, "block", RNODE_BLOCK_PASS(argn)->nd_body));
+        if (RNODE_BLOCK_PASS(argn)->forwarding) {
+            *flag |= VM_CALL_ARGS_SPLAT;
+            *flag |= VM_CALL_KW_SPLAT;
+            *flag |= VM_CALL_ARGS_BLOCKARG;
+            *flag |= VM_CALL_FORWARDING;
+            int idx = ISEQ_BODY(ISEQ_BODY(iseq)->local_iseq)->local_table_size - get_local_var_idx(iseq, idDot3);
+
+            ADD_GETLOCAL(args, argn, idx, get_lvar_level(iseq));
+            return INT2FIX(0);
+        }
+        else {
+            NO_CHECK(COMPILE(arg_block, "block", RNODE_BLOCK_PASS(argn)->nd_body));
+        }
 
         *flag |= VM_CALL_ARGS_BLOCKARG;
 
@@ -9018,7 +9035,7 @@ compile_call(rb_iseq_t *iseq, LINK_ANCHOR *const ret, const NODE *const node, co
         flag |= VM_CALL_FCALL;
     }
 
-    if ((flag & VM_CALL_ARGS_BLOCKARG) && (flag & VM_CALL_KW_SPLAT) && !(flag & VM_CALL_KW_SPLAT_MUT)) {
+    if ((flag & VM_CALL_ARGS_BLOCKARG) && (flag & VM_CALL_KW_SPLAT) && !(flag & VM_CALL_KW_SPLAT_MUT) && !(flag & VM_CALL_FORWARDING)) {
         ADD_INSN(ret, line_node, splatkw);
     }
     ADD_SEND_R(ret, line_node, mid, argc, parent_block, INT2FIX(flag), keywords);

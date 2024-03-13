@@ -867,7 +867,13 @@ send
 // attr rb_snum_t sp_inc = sp_inc_of_sendish(cd->ci);
 // attr rb_snum_t comptime_sp_inc = sp_inc_of_sendish(ci);
 {
-    VALUE bh = vm_caller_setup_arg_block(ec, GET_CFP(), cd->ci, blockiseq, false);
+    CALL_INFO ci = cd->ci;
+
+    if (vm_ci_flag(cd->ci) & VM_CALL_FORWARDING) {
+        ci = (CALL_INFO)TOPN(0);
+    }
+    // FIXME: is GET_CFP() right for forwarding?
+    VALUE bh = vm_caller_setup_arg_block(ec, GET_CFP(), ci, blockiseq, false);
     val = vm_sendish(ec, GET_CFP(), cd, bh, mexp_search_method);
     JIT_EXEC(ec, val);
 
