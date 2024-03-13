@@ -3037,7 +3037,7 @@ vm_callee_setup_arg(rb_execution_context_t *ec, struct rb_calling_info *calling,
         uint32_t argc = vm_ci_argc(callers_info);
 
         // Our local storage is below the args we need to copy
-        int local_size = ISEQ_BODY(ec->cfp->iseq)->local_table_size + argc;
+        int local_size = ISEQ_BODY(rb_vm_search_cf_from_ep(ec, ec->cfp, lep)->iseq)->local_table_size + argc;
 
         const VALUE * from = lep - (local_size + 2); // 2 for EP values
 
@@ -3059,6 +3059,7 @@ vm_callee_setup_arg(rb_execution_context_t *ec, struct rb_calling_info *calling,
 
         ci = callers_info;
         calling->argc = vm_ci_argc(ci);
+        calling->kw_splat = IS_ARGS_KW_SPLAT(ci) > 0;
         argv = ec->cfp->sp - calling->argc;
         cacheable_ci = false;
     }
