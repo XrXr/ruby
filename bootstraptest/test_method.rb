@@ -1176,3 +1176,40 @@ assert_equal 'ok', %q{
   foo
   foo
 }, '[Bug #20178]'
+
+assert_equal 'ok', %q{
+  def bar(x); x; end
+  def foo(...); bar(...); end
+  foo('ok')
+}
+
+assert_equal 'ok', %q{
+  def bar(x); x; end
+  def foo(z, ...); bar(...); end
+  foo(1, 'ok')
+}
+
+assert_equal 'ok', %q{
+  def bar(x, y); x; end
+  def foo(...); bar("ok", ...); end
+  foo(1)
+}
+
+assert_equal 'ok', %q{
+  def bar(x); x; end
+  def foo(...); 1.times { return bar(...) }; end
+  foo("ok")
+}
+
+assert_equal 'ok', %q{
+  def bar(x); yield; end
+  def foo(...); bar(...); end
+  foo(1) { "ok" }
+}
+
+assert_equal 'ok', %q{
+  def baz(x); x; end
+  def bar(...); baz(...); end
+  def foo(...); bar(...); end
+  foo(1) { "ok" }
+}
