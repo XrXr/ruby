@@ -2523,7 +2523,10 @@ vm_base_ptr(const rb_control_frame_t *cfp)
         VALUE *bp = prev_cfp->sp + ISEQ_BODY(cfp->iseq)->local_table_size + VM_ENV_DATA_SIZE;
 
         if (ISEQ_BODY(cfp->iseq)->param.flags.forwardable) {
-            CALL_INFO ci = (CALL_INFO)cfp->ep[-VM_ENV_DATA_SIZE]; // skip EP stuff, CI should be last local
+            int lts = ISEQ_BODY(cfp->iseq)->local_table_size;
+            int params = ISEQ_BODY(cfp->iseq)->param.size;
+
+            CALL_INFO ci = (CALL_INFO)cfp->ep[-(VM_ENV_DATA_SIZE + (lts - params))]; // skip EP stuff, CI should be last local
             bp += vm_ci_argc(ci);
         }
 
