@@ -606,6 +606,10 @@ prepare_iseq_build(rb_iseq_t *iseq,
     if (parent && (type == ISEQ_TYPE_MAIN || type == ISEQ_TYPE_TOP))
         err_info = Qfalse;
 
+    if (parent) {
+        ISEQ_BODY(iseq)->param.flags.forwardable = ISEQ_BODY(parent)->param.flags.forwardable;
+    }
+
     body->type = type;
     set_relation(iseq, parent);
 

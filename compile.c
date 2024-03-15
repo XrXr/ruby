@@ -2108,7 +2108,8 @@ iseq_set_arguments(rb_iseq_t *iseq, LINK_ANCHOR *const optargs, const NODE *cons
         iseq_calc_param_size(iseq);
         body->param.size = arg_size;
 
-        if (args->forwarding) {
+        // Only optimize specifically methods like this: `foo(...)`
+        if (args->forwarding && body->param.size == 3) {
             body->param.flags.forwardable = TRUE;
             body->param.size += 1;
         }
@@ -6300,7 +6301,7 @@ setup_args(rb_iseq_t *iseq, LINK_ANCHOR *const args, const NODE *argn,
         unsigned int dup_rest = 1;
         DECL_ANCHOR(arg_block);
         INIT_ANCHOR(arg_block);
-        if (RNODE_BLOCK_PASS(argn)->forwarding) {
+        if (RNODE_BLOCK_PASS(argn)->forwarding && ISEQ_BODY(iseq)->param.flags.forwardable) {
             *flag |= VM_CALL_ARGS_SPLAT;
             *flag |= VM_CALL_KW_SPLAT;
             *flag |= VM_CALL_ARGS_BLOCKARG;
