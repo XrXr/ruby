@@ -3037,7 +3037,7 @@ vm_callee_setup_arg(rb_execution_context_t *ec, struct rb_calling_info *calling,
         CALL_INFO callers_info = (CALL_INFO)ec->cfp->sp[-1];
 
         // We'll need to copy argc args to this SP
-        uint32_t argc = vm_ci_argc(callers_info);
+        int argc = vm_ci_argc(callers_info);
 
         // Our local storage is below the args we need to copy
         int local_size = ISEQ_BODY(rb_vm_search_cf_from_ep(ec, ec->cfp, lep)->iseq)->local_table_size + argc;
@@ -3177,6 +3177,7 @@ vm_call_iseq_setup(rb_execution_context_t *ec, rb_control_frame_t *cfp, struct r
     int param_size = ISEQ_BODY(iseq)->param.size;
     int local_size = ISEQ_BODY(iseq)->local_table_size;
 
+    // Setting up local size and param size
     if (ISEQ_BODY(iseq)->param.flags.forwardable) {
         local_size = local_size + vm_ci_argc(calling->cd->ci);
         param_size = param_size + vm_ci_argc(calling->cd->ci);
