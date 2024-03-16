@@ -3011,62 +3011,6 @@ vm_callee_setup_arg(rb_execution_context_t *ec, struct rb_calling_info *calling,
         return 0;
     }
 
-    // This case is when the caller is using a ... parameter.
-    // For example `bar(...)`. The call info will have VM_CALL_FORWARDING
-    // In this case the caller's caller's CI will be on the stack.
-    //
-    // For example:
-    //
-    // def bar(a, b); a + b; end
-    // def foo(...); bar(...); end
-    // foo(1, 2) # <- this CI will be on the stack when we call `bar(...)`
-    //
-    // Stack layout will be:
-    //
-    // > 1
-    // > 2
-    // > CI for foo(1, 2)
-    // > cref_or_me
-    // > specval
-    // > type
-    // > receiver
-    // > CI for foo(1, 2), via `getlocal ...`
-    // >      ( SP points here )
-    if (vm_ci_flag(calling->cd->ci) & VM_CALL_FORWARDING) {
-        const VALUE * lep = VM_CF_LEP(ec->cfp);
-        CALL_INFO callers_info = (CALL_INFO)ec->cfp->sp[-1];
-
-        // We'll need to copy argc args to this SP
-        int argc = vm_ci_argc(callers_info);
-
-        // Our local storage is below the args we need to copy
-        int local_size = ISEQ_BODY(rb_vm_search_cf_from_ep(ec, ec->cfp, lep)->iseq)->local_table_size + argc;
-
-        const VALUE * from = lep - (local_size + 2); // 2 for EP values
-
-        MEMCPY(ec->cfp->sp - 1, from, VALUE, argc);
-        ec->cfp->sp += (argc - 1); // -1 because we "popped" the CI
-
-        // Stack layout should now be:
-        //
-        // > 1
-        // > 2
-        // > CI for foo(1, 2)
-        // > cref_or_me
-        // > specval
-        // > type
-        // > receiver
-        // > 1
-        // > 2
-        // >      ( SP points here )
-
-        ci = callers_info;
-        calling->argc = vm_ci_argc(ci);
-        calling->kw_splat = IS_ARGS_KW_SPLAT(ci) > 0;
-        argv = ec->cfp->sp - calling->argc;
-        cacheable_ci = false;
-    }
-
     if (LIKELY(!(vm_ci_flag(ci) & VM_CALL_KW_SPLAT))) {
         if (LIKELY(rb_simple_iseq_p(iseq))) {
             rb_control_frame_t *cfp = ec->cfp;
@@ -3165,6 +3109,58 @@ vm_callee_setup_arg(rb_execution_context_t *ec, struct rb_calling_info *calling,
     }
 
     return setup_parameters_complex(ec, iseq, calling, ci, argv, arg_setup_method);
+}
+
+static void
+vm_adjust_stack_forwarding(struct rb_execution_context_struct *ec, struct rb_control_frame_struct *cfp)
+{
+    // This case is when the caller is using a ... parameter.
+    // For example `bar(...)`. The call info will have VM_CALL_FORWARDING
+    // In this case the caller's caller's CI will be on the stack.
+    //
+    // For example:
+    //
+    // def bar(a, b); a + b; end
+    // def foo(...); bar(...); end
+    // foo(1, 2) # <- this CI will be on the stack when we call `bar(...)`
+    //
+    // Stack layout will be:
+    //
+    // > 1
+    // > 2
+    // > CI for foo(1, 2)
+    // > cref_or_me
+    // > specval
+    // > type
+    // > receiver
+    // > CI for foo(1, 2), via `getlocal ...`
+    // >      ( SP points here )
+    const VALUE * lep = VM_CF_LEP(cfp);
+    CALL_INFO callers_info = (CALL_INFO)cfp->sp[-1];
+
+    // We'll need to copy argc args to this SP
+    int argc = vm_ci_argc(callers_info);
+
+    // Our local storage is below the args we need to copy
+    int local_size = ISEQ_BODY(rb_vm_search_cf_from_ep(ec, cfp, lep)->iseq)->local_table_size + argc;
+
+    const VALUE * from = lep - (local_size + 2); // 2 for EP values
+
+    MEMCPY(cfp->sp - 1, from, VALUE, argc);
+    cfp->sp += (argc - 1); // -1 because we "popped" the CI
+
+    // Stack layout should now be:
+    //
+    // > 1
+    // > 2
+    // > CI for foo(1, 2)
+    // > cref_or_me
+    // > specval
+    // > type
+    // > receiver
+    // > 1
+    // > 2
+    // >      ( SP points here )
 }
 
 static VALUE

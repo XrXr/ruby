@@ -871,9 +871,28 @@ send
 
     VALUE bh = Qundef;
 
-    if (vm_ci_flag(cd->ci) & VM_CALL_FORWARDING) {
+    struct rb_call_data adjusted_cd;
+    struct rb_callinfo adjusted_ci;
+
+    CALL_DATA _cd = cd;
+
+    if (vm_ci_flag(ci) & VM_CALL_FORWARDING) {
         ci = (CALL_INFO)TOPN(0);
         bh = VM_ENV_BLOCK_HANDLER(GET_LEP());
+
+        vm_adjust_stack_forwarding(ec, GET_CFP());
+        adjusted_ci = VM_CI_ON_STACK(
+            vm_ci_mid(cd->ci),
+            vm_ci_flag(ci) | (vm_ci_flag(cd->ci) & VM_CALL_FCALL),
+            vm_ci_argc(ci),
+            vm_ci_kwarg(ci)
+        );
+
+        adjusted_cd.ci = &adjusted_ci;
+        adjusted_cd.cc = cd->cc;
+
+        ci = &adjusted_ci;
+        cd = &adjusted_cd;
     }
     else {
         bh = vm_caller_setup_arg_block(ec, GET_CFP(), ci, blockiseq, false);
@@ -881,6 +900,10 @@ send
 
     val = vm_sendish(ec, GET_CFP(), cd, bh, mexp_search_method);
     JIT_EXEC(ec, val);
+
+    if (vm_ci_flag(_cd->ci) & VM_CALL_FORWARDING) {
+      _cd->cc = cd->cc;
+    }
 
     if (UNDEF_P(val)) {
         RESTORE_REGS();
