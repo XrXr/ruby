@@ -3017,7 +3017,15 @@ vm_callee_setup_arg(rb_execution_context_t *ec, struct rb_calling_info *calling,
                 ci = forward_cd->caller_ci;
             }
         }
-        RUBY_ASSERT_ALWAYS(vm_ci_markable(ci));
+        // C functions calling iseqs will stack allocate a CI,
+        // so we need to convert it to heap allocated
+        if (!vm_ci_markable(ci)) {
+            ci = vm_ci_new_runtime(
+                    vm_ci_mid(ci),
+                    vm_ci_flag(ci),
+                    vm_ci_argc(ci),
+                    vm_ci_kwarg(ci));
+        }
         argv[param_size - 2] = 0xCAFEF00D;
         argv[param_size - 1] = (VALUE)ci;
         return 0;
@@ -5748,10 +5756,6 @@ vm_sendish(
     int argc = vm_ci_argc(ci);
 
     VALUE recv = TOPN(argc);
-
-    if (vm_ci_flag(cd->ci) & VM_CALL_FORWARDING) {
-        recv = TOPN(argc + 1);
-    }
 
     struct rb_calling_info calling = {
         .block_handler = block_handler,
