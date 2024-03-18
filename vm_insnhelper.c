@@ -3005,6 +3005,18 @@ vm_callee_setup_arg(rb_execution_context_t *ec, struct rb_calling_info *calling,
     //   => type
     //
     if (ISEQ_BODY(iseq)->param.flags.forwardable) {
+        if ((vm_ci_flag(ci) & VM_CALL_FORWARDING)) {
+            struct rb_forwarding_call_data * forward_cd = (struct rb_forwarding_call_data *)calling->cd;
+            if (vm_ci_argc(ci) != vm_ci_argc(forward_cd->caller_ci)) {
+                ci = vm_ci_new_runtime(
+                        vm_ci_mid(ci),
+                        vm_ci_flag(ci),
+                        vm_ci_argc(ci),
+                        vm_ci_kwarg(ci));
+            } else {
+                ci = forward_cd->caller_ci;
+            }
+        }
         RUBY_ASSERT_ALWAYS(vm_ci_markable(ci));
         argv[param_size - 2] = 0xCAFEF00D;
         argv[param_size - 1] = (VALUE)ci;
@@ -3112,7 +3124,7 @@ vm_callee_setup_arg(rb_execution_context_t *ec, struct rb_calling_info *calling,
 }
 
 static void
-vm_adjust_stack_forwarding(struct rb_execution_context_struct *ec, struct rb_control_frame_struct *cfp)
+vm_adjust_stack_forwarding(struct rb_execution_context_struct *ec, struct rb_control_frame_struct *cfp, CALL_INFO callers_info)
 {
     // This case is when the caller is using a ... parameter.
     // For example `bar(...)`. The call info will have VM_CALL_FORWARDING
@@ -3136,7 +3148,6 @@ vm_adjust_stack_forwarding(struct rb_execution_context_struct *ec, struct rb_con
     // > CI for foo(1, 2), via `getlocal ...`
     // >      ( SP points here )
     const VALUE * lep = VM_CF_LEP(cfp);
-    CALL_INFO callers_info = (CALL_INFO)cfp->sp[-1];
 
     // We'll need to copy argc args to this SP
     int argc = vm_ci_argc(callers_info);
@@ -5739,7 +5750,7 @@ vm_sendish(
     VALUE recv = TOPN(argc);
 
     if (vm_ci_flag(cd->ci) & VM_CALL_FORWARDING) {
-        recv = TOPN(1);
+        recv = TOPN(argc + 1);
     }
 
     struct rb_calling_info calling = {

@@ -1211,5 +1211,12 @@ assert_equal 'ok', %q{
   def baz(x); x; end
   def bar(...); baz(...); end
   def foo(...); bar(...); end
-  foo(1) { "ok" }
+  foo("ok")
+}
+
+assert_equal '[1, 2, 3, 4]', %q{
+  def baz(a, b, c, d); [a, b, c, d]; end
+  def bar(...); baz(1, ...); end
+  def foo(...); bar(2, ...); end
+  foo(3, 4)
 }
