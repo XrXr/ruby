@@ -884,7 +884,7 @@ send
         adjusted_ci = VM_CI_ON_STACK(
             vm_ci_mid(cd->ci),
             vm_ci_flag(ci) | (vm_ci_flag(cd->ci) & VM_CALL_FCALL),
-            vm_ci_argc(ci),
+            vm_ci_argc(ci) + vm_ci_argc(cd->ci),
             vm_ci_kwarg(ci)
         );
 
