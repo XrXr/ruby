@@ -9538,7 +9538,7 @@ compile_super(rb_iseq_t *iseq, LINK_ANCHOR *const ret, const NODE *const node, i
         VALUE vargc = setup_args(iseq, args, RNODE_SUPER(node)->nd_args, &flag, &keywords);
         CHECK(!NIL_P(vargc));
         argc = FIX2INT(vargc);
-        if ((flag & VM_CALL_ARGS_BLOCKARG) && (flag & VM_CALL_KW_SPLAT) && !(flag & VM_CALL_KW_SPLAT_MUT)) {
+        if ((flag & VM_CALL_ARGS_BLOCKARG) && (flag & VM_CALL_KW_SPLAT) && !(flag & VM_CALL_KW_SPLAT_MUT) && !(flag & VM_CALL_FORWARDING)) {
             ADD_INSN(args, node, splatkw);
         }
     }
@@ -9558,79 +9558,90 @@ compile_super(rb_iseq_t *iseq, LINK_ANCHOR *const ret, const NODE *const node, i
             ADD_GETLOCAL(args, node, idx, lvar_level);
         }
 
-        if (local_body->param.flags.has_opt) {
-            /* optional arguments */
-            int j;
-            for (j = 0; j < local_body->param.opt_num; j++) {
-                int idx = local_body->local_table_size - (i + j);
-                ADD_GETLOCAL(args, node, idx, lvar_level);
-            }
-            i += j;
-            argc = i;
-        }
-        if (local_body->param.flags.has_rest) {
-            /* rest argument */
-            int idx = local_body->local_table_size - local_body->param.rest_start;
-            ADD_GETLOCAL(args, node, idx, lvar_level);
-            ADD_INSN1(args, node, splatarray, RBOOL(local_body->param.flags.has_post));
-
-            argc = local_body->param.rest_start + 1;
+        /* forward ... */
+        if (local_body->param.flags.forwardable) {
+            flag |= VM_CALL_ARGS_BLOCKARG;
             flag |= VM_CALL_ARGS_SPLAT;
+            flag |= VM_CALL_KW_SPLAT;
+            flag |= VM_CALL_FORWARDING;
+            int idx = local_body->local_table_size - get_local_var_idx(liseq, idDot3);
+            ADD_GETLOCAL(args, node, idx, lvar_level);
         }
-        if (local_body->param.flags.has_post) {
-            /* post arguments */
-            int post_len = local_body->param.post_num;
-            int post_start = local_body->param.post_start;
-
+        else {
+            if (local_body->param.flags.has_opt) {
+                /* optional arguments */
+                int j;
+                for (j = 0; j < local_body->param.opt_num; j++) {
+                    int idx = local_body->local_table_size - (i + j);
+                    ADD_GETLOCAL(args, node, idx, lvar_level);
+                }
+                i += j;
+                argc = i;
+            }
             if (local_body->param.flags.has_rest) {
-                int j;
-                for (j=0; j<post_len; j++) {
-                    int idx = local_body->local_table_size - (post_start + j);
+                /* rest argument */
+                int idx = local_body->local_table_size - local_body->param.rest_start;
+                ADD_GETLOCAL(args, node, idx, lvar_level);
+                ADD_INSN1(args, node, splatarray, RBOOL(local_body->param.flags.has_post));
+
+                argc = local_body->param.rest_start + 1;
+                flag |= VM_CALL_ARGS_SPLAT;
+            }
+            if (local_body->param.flags.has_post) {
+                /* post arguments */
+                int post_len = local_body->param.post_num;
+                int post_start = local_body->param.post_start;
+
+                if (local_body->param.flags.has_rest) {
+                    int j;
+                    for (j=0; j<post_len; j++) {
+                        int idx = local_body->local_table_size - (post_start + j);
+                        ADD_GETLOCAL(args, node, idx, lvar_level);
+                    }
+                    ADD_INSN1(args, node, pushtoarray, INT2FIX(j));
+                    flag |= VM_CALL_ARGS_SPLAT_MUT;
+                    /* argc is settled at above */
+                }
+                else {
+                    int j;
+                    for (j=0; j<post_len; j++) {
+                        int idx = local_body->local_table_size - (post_start + j);
+                        ADD_GETLOCAL(args, node, idx, lvar_level);
+                    }
+                    argc = post_len + post_start;
+                }
+            }
+
+            if (local_body->param.flags.has_kw) { /* TODO: support keywords */
+                int local_size = local_body->local_table_size;
+                argc++;
+
+                ADD_INSN1(args, node, putspecialobject, INT2FIX(VM_SPECIAL_OBJECT_VMCORE));
+
+                if (local_body->param.flags.has_kwrest) {
+                    int idx = local_body->local_table_size - local_kwd->rest_start;
+                    ADD_GETLOCAL(args, node, idx, lvar_level);
+                    RUBY_ASSERT(local_kwd->num > 0);
+                    ADD_SEND (args, node, rb_intern("dup"), INT2FIX(0));
+                }
+                else {
+                    ADD_INSN1(args, node, newhash, INT2FIX(0));
+                }
+                for (i = 0; i < local_kwd->num; ++i) {
+                    ID id = local_kwd->table[i];
+                    int idx = local_size - get_local_var_idx(liseq, id);
+                    ADD_INSN1(args, node, putobject, ID2SYM(id));
                     ADD_GETLOCAL(args, node, idx, lvar_level);
                 }
-                ADD_INSN1(args, node, pushtoarray, INT2FIX(j));
-                flag |= VM_CALL_ARGS_SPLAT_MUT;
-                /* argc is settled at above */
+                ADD_SEND(args, node, id_core_hash_merge_ptr, INT2FIX(i * 2 + 1));
+                flag |= VM_CALL_KW_SPLAT| VM_CALL_KW_SPLAT_MUT;
             }
-            else {
-                int j;
-                for (j=0; j<post_len; j++) {
-                    int idx = local_body->local_table_size - (post_start + j);
-                    ADD_GETLOCAL(args, node, idx, lvar_level);
-                }
-                argc = post_len + post_start;
-            }
-        }
-
-        if (local_body->param.flags.has_kw) { /* TODO: support keywords */
-            int local_size = local_body->local_table_size;
-            argc++;
-
-            ADD_INSN1(args, node, putspecialobject, INT2FIX(VM_SPECIAL_OBJECT_VMCORE));
-
-            if (local_body->param.flags.has_kwrest) {
+            else if (local_body->param.flags.has_kwrest) {
                 int idx = local_body->local_table_size - local_kwd->rest_start;
                 ADD_GETLOCAL(args, node, idx, lvar_level);
-                RUBY_ASSERT(local_kwd->num > 0);
-                ADD_SEND (args, node, rb_intern("dup"), INT2FIX(0));
+                argc++;
+                flag |= VM_CALL_KW_SPLAT;
             }
-            else {
-                ADD_INSN1(args, node, newhash, INT2FIX(0));
-            }
-            for (i = 0; i < local_kwd->num; ++i) {
-                ID id = local_kwd->table[i];
-                int idx = local_size - get_local_var_idx(liseq, id);
-                ADD_INSN1(args, node, putobject, ID2SYM(id));
-                ADD_GETLOCAL(args, node, idx, lvar_level);
-            }
-            ADD_SEND(args, node, id_core_hash_merge_ptr, INT2FIX(i * 2 + 1));
-            flag |= VM_CALL_KW_SPLAT| VM_CALL_KW_SPLAT_MUT;
-        }
-        else if (local_body->param.flags.has_kwrest) {
-            int idx = local_body->local_table_size - local_kwd->rest_start;
-            ADD_GETLOCAL(args, node, idx, lvar_level);
-            argc++;
-            flag |= VM_CALL_KW_SPLAT;
         }
     }
 

@@ -1220,3 +1220,21 @@ assert_equal '[1, 2, 3, 4]', %q{
   def foo(...); bar(2, ...); end
   foo(3, 4)
 }
+
+assert_equal 'ok', %q{
+  class Foo; def self.foo(x); x; end; end
+  class Bar < Foo; def self.foo(...); super; end; end
+  Bar.foo('ok')
+}
+
+assert_equal 'ok', %q{
+  class Foo; def self.foo(x); x; end; end
+  class Bar < Foo; def self.foo(...); super(...); end; end
+  Bar.foo('ok')
+}
+
+assert_equal 'ok', %q{
+  class Foo; def self.foo(x, y); x + y; end; end
+  class Bar < Foo; def self.foo(...); super("o", ...); end; end
+  Bar.foo('k')
+}

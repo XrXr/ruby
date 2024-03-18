@@ -1026,9 +1026,44 @@ invokesuper
 // attr rb_snum_t sp_inc = sp_inc_of_sendish(cd->ci);
 // attr rb_snum_t comptime_sp_inc = sp_inc_of_sendish(ci);
 {
-    VALUE bh = vm_caller_setup_arg_block(ec, GET_CFP(), cd->ci, blockiseq, true);
+    CALL_INFO ci = cd->ci;
+
+    VALUE bh = Qundef;
+
+    struct rb_forwarding_call_data adjusted_cd;
+    struct rb_callinfo adjusted_ci;
+
+    CALL_DATA _cd = cd;
+
+    if (vm_ci_flag(ci) & VM_CALL_FORWARDING) {
+        ci = (CALL_INFO)TOPN(0);
+        bh = VM_ENV_BLOCK_HANDLER(GET_LEP());
+
+        vm_adjust_stack_forwarding(ec, GET_CFP(), ci);
+        adjusted_ci = VM_CI_ON_STACK(
+            vm_ci_mid(cd->ci),
+            vm_ci_flag(ci) | (vm_ci_flag(cd->ci) & (VM_CALL_FCALL | VM_CALL_FORWARDING)),
+            vm_ci_argc(ci) + vm_ci_argc(cd->ci),
+            vm_ci_kwarg(ci)
+        );
+
+        adjusted_cd.cd.ci = &adjusted_ci;
+        adjusted_cd.cd.cc = cd->cc;
+        adjusted_cd.caller_ci = ci;
+
+        ci = &adjusted_ci;
+        cd = (CALL_DATA)&adjusted_cd;
+    }
+    else {
+        bh = vm_caller_setup_arg_block(ec, GET_CFP(), ci, blockiseq, true);
+    }
+
     val = vm_sendish(ec, GET_CFP(), cd, bh, mexp_search_super);
     JIT_EXEC(ec, val);
+
+    if (vm_ci_flag(_cd->ci) & VM_CALL_FORWARDING) {
+      _cd->cc = cd->cc;
+    }
 
     if (UNDEF_P(val)) {
         RESTORE_REGS();
