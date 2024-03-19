@@ -1202,6 +1202,12 @@ assert_equal 'ok', %q{
 }
 
 assert_equal 'ok', %q{
+  def bar(x); x; end
+  def foo(...); x = nil; 1.times { x = bar(...) }; x; end
+  foo("ok")
+}
+
+assert_equal 'ok', %q{
   def bar(x); yield; end
   def foo(...); bar(...); end
   foo(1) { "ok" }
