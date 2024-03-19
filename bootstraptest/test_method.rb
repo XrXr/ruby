@@ -1244,3 +1244,9 @@ assert_equal 'ok', %q{
   class Bar < Foo; def self.foo(...); super("o", ...); end; end
   Bar.foo('k')
 }
+
+assert_equal 'ok', %q{
+  def bar(a); a; end
+  def foo(...); lambda { bar(...) }; end
+  foo("ok").call
+}

@@ -3160,8 +3160,20 @@ vm_adjust_stack_forwarding(struct rb_execution_context_struct *ec, struct rb_con
     // We'll need to copy argc args to this SP
     int argc = vm_ci_argc(callers_info);
 
+    const rb_iseq_t *iseq;
+
+    // If we're in an escaped environment (lambda for example), get the iseq
+    // from the captured env.
+    if (VM_ENV_FLAGS(lep, VM_ENV_FLAG_ESCAPED)) {
+        rb_env_t * env = (rb_env_t *)lep[VM_ENV_DATA_INDEX_ENV];
+        iseq = env->iseq;
+    }
+    else { // Otherwise use the lep to find the caller
+        iseq = rb_vm_search_cf_from_ep(ec, cfp, lep)->iseq;
+    }
+
     // Our local storage is below the args we need to copy
-    int local_size = ISEQ_BODY(rb_vm_search_cf_from_ep(ec, cfp, lep)->iseq)->local_table_size + argc;
+    int local_size = ISEQ_BODY(iseq)->local_table_size + argc;
 
     const VALUE * from = lep - (local_size + 2); // 2 for EP values
 
