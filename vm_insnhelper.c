@@ -2059,7 +2059,7 @@ vm_ccs_verify(struct rb_class_cc_entries *ccs, ID mid, VALUE klass)
         VM_ASSERT(IMEMO_TYPE_P(cc, imemo_callcache));
         VM_ASSERT(vm_cc_class_check(cc, klass));
         VM_ASSERT(vm_cc_check_cme(cc, ccs->cme));
-        VM_ASSERT(!vm_cc_super_p(cc));
+        VM_ASSERT(!vm_cc_orphan_p(cc));
         VM_ASSERT(!vm_cc_refinement_p(cc));
     }
     return TRUE;
@@ -2154,7 +2154,7 @@ vm_search_cc(const VALUE klass, const struct rb_callinfo * const ci)
 
     cme = rb_check_overloaded_cme(cme, ci);
 
-    const struct rb_callcache *cc = vm_cc_new(klass, cme, vm_call_general, cc_type_normal);
+    const struct rb_callcache *cc = vm_cc_new(klass, cme, vm_call_general, vm_ci_cacheable(ci) ? cc_type_normal : cc_type_orphan);
     vm_ccs_push(klass, ccs, ci, cc);
 
     VM_ASSERT(vm_cc_cme(cc) != NULL);
@@ -4874,7 +4874,7 @@ vm_search_super_method(const rb_control_frame_t *reg_cfp, struct rb_call_data *c
 
     if (!klass) {
         /* bound instance method of module */
-        cc = vm_cc_new(klass, NULL, vm_call_method_missing, cc_type_super);
+        cc = vm_cc_new(klass, NULL, vm_call_method_missing, cc_type_orphan);
         RB_OBJ_WRITE(reg_cfp->iseq, &cd->cc, cc);
     }
     else {
@@ -4889,7 +4889,7 @@ vm_search_super_method(const rb_control_frame_t *reg_cfp, struct rb_call_data *c
         else if (cached_cme->called_id != mid) {
             const rb_callable_method_entry_t *cme = rb_callable_method_entry(klass, mid);
             if (cme) {
-                cc = vm_cc_new(klass, cme, vm_call_super_method, cc_type_super);
+                cc = vm_cc_new(klass, cme, vm_call_super_method, cc_type_orphan);
                 RB_OBJ_WRITE(reg_cfp->iseq, &cd->cc, cc);
             }
             else {
