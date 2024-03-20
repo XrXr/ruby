@@ -4854,13 +4854,18 @@ vm_search_super_method(const rb_control_frame_t *reg_cfp, struct rb_call_data *c
 
     ID mid = me->def->original_id;
 
-    // update iseq. really? (TODO)
-    cd->ci = vm_ci_new_runtime(mid,
-                               vm_ci_flag(cd->ci),
-                               vm_ci_argc(cd->ci),
-                               vm_ci_kwarg(cd->ci));
+    if (!vm_ci_markable(cd->ci)) {
+        VM_FORCE_WRITE((const VALUE *)&cd->ci->mid, (VALUE)mid);
+    }
+    else {
+        // update iseq. really? (TODO)
+        cd->ci = vm_ci_new_runtime(mid,
+                                   vm_ci_flag(cd->ci),
+                                   vm_ci_argc(cd->ci),
+                                   vm_ci_kwarg(cd->ci));
 
-    RB_OBJ_WRITTEN(reg_cfp->iseq, Qundef, cd->ci);
+        RB_OBJ_WRITTEN(reg_cfp->iseq, Qundef, cd->ci);
+    }
 
     const struct rb_callcache *cc;
 
