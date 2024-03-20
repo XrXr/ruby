@@ -257,6 +257,12 @@ vm_ci_markable(const struct rb_callinfo *ci)
     }
 }
 
+static inline bool
+vm_ci_cacheable(const struct rb_callinfo *ci)
+{
+    return vm_ci_markable(ci) && !(vm_ci_flag(ci) & VM_CALL_FORWARDING);
+}
+
 #define VM_CI_ON_STACK(mid_, flags_, argc_, kwarg_) \
     (struct rb_callinfo) {                          \
         .flags = T_IMEMO |                          \

@@ -2006,7 +2006,7 @@ vm_ccs_push(VALUE klass, struct rb_class_cc_entries *ccs, const struct rb_callin
     if (! vm_cc_markable(cc)) {
         return;
     }
-    else if (! vm_ci_markable(ci)) {
+    else if (! vm_ci_cacheable(ci)) {
         return;
     }
 
@@ -2984,7 +2984,7 @@ vm_callee_setup_arg(rb_execution_context_t *ec, struct rb_calling_info *calling,
 {
     const struct rb_callinfo *ci = calling->cd->ci;
     const struct rb_callcache *cc = calling->cc;
-    bool cacheable_ci = vm_ci_markable(ci);
+    bool cacheable_ci = vm_ci_cacheable(ci);
 
     // Called iseq is using ... param
     // def foo(...) # <- iseq for foo will have "forwardable"
