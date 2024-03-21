@@ -4602,7 +4602,7 @@ vm_call_method_each_type(rb_execution_context_t *ec, rb_control_frame_t *cfp, st
 
         rb_check_arity(calling->argc, 1, 1);
 
-        const unsigned int aset_mask = (VM_CALL_ARGS_SPLAT | VM_CALL_KW_SPLAT | VM_CALL_KWARG);
+        const unsigned int aset_mask = (VM_CALL_ARGS_SPLAT | VM_CALL_KW_SPLAT | VM_CALL_KWARG | VM_CALL_FORWARDING);
 
         if (vm_cc_markable(cc)) {
             vm_cc_attr_index_initialize(cc, INVALID_SHAPE_ID);
@@ -4636,7 +4636,7 @@ vm_call_method_each_type(rb_execution_context_t *ec, rb_control_frame_t *cfp, st
         CALLER_SETUP_ARG(cfp, calling, ci, 0);
         rb_check_arity(calling->argc, 0, 0);
         vm_cc_attr_index_initialize(cc, INVALID_SHAPE_ID);
-        const unsigned int ivar_mask = (VM_CALL_ARGS_SPLAT | VM_CALL_KW_SPLAT);
+        const unsigned int ivar_mask = (VM_CALL_ARGS_SPLAT | VM_CALL_KW_SPLAT | VM_CALL_FORWARDING);
         VM_CALL_METHOD_ATTR(v,
                             vm_call_ivar(ec, cfp, calling),
                             CC_SET_FASTPATH(cc, vm_call_ivar, !(vm_ci_flag(ci) & ivar_mask)));
