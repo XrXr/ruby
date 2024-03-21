@@ -1256,3 +1256,9 @@ assert_equal 'ok', %q{
   class Bar < Foo; def self.y(&b); b; end; def self.foo(...); y { super("o", ...) }; end; end
   Bar.foo('k').call
 }
+
+assert_equal 'ok', %q{
+  def baz(n); n; end
+  def foo(...); bar = baz(...); lambda { lambda { bar } }; end
+  foo("ok").call.call
+}
