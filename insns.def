@@ -877,6 +877,7 @@ send
     CALL_DATA _cd = cd;
 
     if (vm_ci_flag(ci) & VM_CALL_FORWARDING) {
+        RUBY_ASSERT(ISEQ_BODY(GET_ISEQ())->param.flags.forwardable);
         ci = (CALL_INFO)TOPN(0);
         bh = VM_ENV_BLOCK_HANDLER(GET_LEP());
 
@@ -1038,6 +1039,7 @@ invokesuper
     CALL_DATA _cd = cd;
 
     if (vm_ci_flag(ci) & VM_CALL_FORWARDING) {
+        RUBY_ASSERT(ISEQ_BODY(GET_ISEQ())->param.flags.forwardable);
         ci = (CALL_INFO)TOPN(0);
         bh = VM_ENV_BLOCK_HANDLER(GET_LEP());
 
