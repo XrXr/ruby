@@ -1262,3 +1262,9 @@ assert_equal 'ok', %q{
   def foo(...); bar = baz(...); lambda { lambda { bar } }; end
   foo("ok").call.call
 }
+
+assert_equal 'ok', %q{
+  class A; def self.foo(...); new(...); end; attr_reader :b; def initialize(a, b:"ng"); @a = a; @b = b; end end
+  A.foo(1).b
+  A.foo(1, b: "ok").b
+}
