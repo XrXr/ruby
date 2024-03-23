@@ -1268,3 +1268,11 @@ assert_equal 'ok', %q{
   A.foo(1).b
   A.foo(1, b: "ok").b
 }
+
+assert_equal 'ok', %q{
+  class A; def initialize; @a = ["ok"]; end; def first(...); @a.first(...); end; end
+  def call x; x.first; end
+  def call1 x; x.first(1); end
+  call(A.new)
+  call1(A.new).first
+}
