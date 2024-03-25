@@ -904,7 +904,7 @@ send
     JIT_EXEC(ec, val);
 
     if (vm_ci_flag(_cd->ci) & VM_CALL_FORWARDING) {
-      if (_cd->cc != cd->cc) {
+      if (_cd->cc != cd->cc && vm_cc_markable(cd->cc)) {
           RB_OBJ_WRITE(GET_ISEQ(), &_cd->cc, cd->cc);
       }
     }
@@ -1066,7 +1066,7 @@ invokesuper
     JIT_EXEC(ec, val);
 
     if (vm_ci_flag(_cd->ci) & VM_CALL_FORWARDING) {
-      if (_cd->cc != cd->cc) {
+      if (_cd->cc != cd->cc && vm_cc_markable(cd->cc)) {
           RB_OBJ_WRITE(GET_ISEQ(), &_cd->cc, cd->cc);
       }
     }
