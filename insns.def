@@ -1040,9 +1040,15 @@ invokesuper
 
     if (vm_ci_flag(ci) & VM_CALL_FORWARDING) {
         RUBY_ASSERT(ISEQ_BODY(GET_ISEQ())->param.flags.forwardable);
-        ci = (CALL_INFO)TOPN(0);
-        bh = VM_ENV_BLOCK_HANDLER(GET_LEP());
 
+        if (vm_ci_flag(ci) & VM_CALL_ARGS_BLOCKARG) {
+            bh = VM_ENV_BLOCK_HANDLER(GET_LEP());
+        }
+        else {
+            bh = vm_caller_setup_arg_block(ec, GET_CFP(), ci, blockiseq, true);
+        }
+
+        ci = (CALL_INFO)TOPN(0);
         vm_adjust_stack_forwarding(ec, GET_CFP(), ci);
         adjusted_ci = VM_CI_ON_STACK(
             vm_ci_mid(cd->ci),

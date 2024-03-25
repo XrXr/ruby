@@ -9560,7 +9560,6 @@ compile_super(rb_iseq_t *iseq, LINK_ANCHOR *const ret, const NODE *const node, i
 
         /* forward ... */
         if (local_body->param.flags.forwardable) {
-            flag |= VM_CALL_ARGS_BLOCKARG;
             flag |= VM_CALL_ARGS_SPLAT;
             flag |= VM_CALL_KW_SPLAT;
             flag |= VM_CALL_FORWARDING;

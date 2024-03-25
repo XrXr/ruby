@@ -1276,3 +1276,15 @@ assert_equal 'ok', %q{
   call(A.new)
   call1(A.new).first
 }
+
+assert_equal 'ok', %q{
+  class A; def foo; yield("o"); end; end
+  class B < A; def foo(...); super { |x| yield(x + "k") }; end; end
+  B.new.foo { |x| x }
+}
+
+assert_equal 'ok', %q{
+  class A; def foo; yield("ok"); end; end
+  class B < A; def foo(...); super(...) { |x| yield("not " + x) }; end; end
+  B.new.foo { |x| x }
+}
