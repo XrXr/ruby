@@ -3027,6 +3027,9 @@ vm_callee_setup_arg(rb_execution_context_t *ec, struct rb_calling_info *calling,
                     vm_ci_argc(ci),
                     vm_ci_kwarg(ci));
         }
+        // FIXME: we need to decrease the local size
+        argv[param_size - 4] = 0xCAFEF02D;
+        argv[param_size - 3] = 0xCAFEF01D;
         argv[param_size - 2] = 0xCAFEF00D;
         argv[param_size - 1] = (VALUE)ci;
         return 0;
