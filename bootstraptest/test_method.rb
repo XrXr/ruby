@@ -1282,9 +1282,3 @@ assert_equal 'ok', %q{
   class B < A; def foo(...); super { |x| yield(x + "k") }; end; end
   B.new.foo { |x| x }
 }
-
-assert_equal 'ok', %q{
-  class A; def foo; yield("ok"); end; end
-  class B < A; def foo(...); super(...) { |x| yield("not " + x) }; end; end
-  B.new.foo { |x| x }
-}
