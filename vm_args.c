@@ -1065,7 +1065,7 @@ vm_caller_setup_args(const rb_execution_context_t *ec, rb_control_frame_t *reg_c
 
         // Need to setup the block in case of e.g. `super { :block }`
         if (is_super && blockiseq) {
-            bh = vm_caller_setup_arg_block(ec, GET_CFP(), site_ci, blockiseq, true);
+            bh = vm_caller_setup_arg_block(ec, GET_CFP(), site_ci, blockiseq, is_super);
         }
         else {
             bh = VM_ENV_BLOCK_HANDLER(GET_LEP());
@@ -1086,7 +1086,7 @@ vm_caller_setup_args(const rb_execution_context_t *ec, rb_control_frame_t *reg_c
         *cd = &adjusted_cd->cd;
     }
     else {
-        bh = vm_caller_setup_arg_block(ec, GET_CFP(), site_ci, blockiseq, false);
+        bh = vm_caller_setup_arg_block(ec, GET_CFP(), site_ci, blockiseq, is_super);
     }
 
     return bh;
