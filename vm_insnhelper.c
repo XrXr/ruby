@@ -5806,8 +5806,48 @@ VALUE
 rb_vm_send(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, CALL_DATA cd, ISEQ blockiseq)
 {
     stack_check(ec);
-    VALUE bh = vm_caller_setup_arg_block(ec, GET_CFP(), cd->ci, blockiseq, false);
+
+    CALL_INFO ci = cd->ci;
+
+    VALUE bh = Qundef;
+
+    struct rb_forwarding_call_data adjusted_cd;
+    struct rb_callinfo adjusted_ci;
+
+    CALL_DATA _cd = cd;
+
+    if (vm_ci_flag(ci) & VM_CALL_FORWARDING) {
+        RUBY_ASSERT(ISEQ_BODY(GET_ISEQ())->param.flags.forwardable);
+        ci = (CALL_INFO)TOPN(0);
+        bh = VM_ENV_BLOCK_HANDLER(GET_LEP());
+
+        vm_adjust_stack_forwarding(ec, GET_CFP(), ci);
+        adjusted_ci = VM_CI_ON_STACK(
+            vm_ci_mid(cd->ci),
+            vm_ci_flag(ci) | (vm_ci_flag(cd->ci) & (VM_CALL_FCALL | VM_CALL_FORWARDING)),
+            vm_ci_argc(ci) + vm_ci_argc(cd->ci),
+            vm_ci_kwarg(ci)
+        );
+
+        adjusted_cd.cd.ci = &adjusted_ci;
+        adjusted_cd.cd.cc = cd->cc;
+        adjusted_cd.caller_ci = ci;
+
+        ci = &adjusted_ci;
+        cd = (CALL_DATA)&adjusted_cd;
+    }
+    else {
+        bh = vm_caller_setup_arg_block(ec, GET_CFP(), ci, blockiseq, false);
+    }
+
     VALUE val = vm_sendish(ec, GET_CFP(), cd, bh, mexp_search_method);
+
+    if (vm_ci_flag(_cd->ci) & VM_CALL_FORWARDING) {
+      if (_cd->cc != cd->cc && vm_cc_markable(cd->cc)) {
+          RB_OBJ_WRITE(GET_ISEQ(), &_cd->cc, cd->cc);
+      }
+    }
+
     VM_EXEC(ec, val);
     return val;
 }

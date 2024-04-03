@@ -6837,7 +6837,13 @@ fn gen_send_iseq(
     let mut kw_splat = flags & VM_CALL_KW_SPLAT != 0;
     let mut splat_call = flags & VM_CALL_ARGS_SPLAT != 0;
 
-    let forwarding_call = unsafe { rb_get_iseq_flags_forwardable(iseq) };
+    let forwarding_call = unsafe { rb_get_iseq_flags_forwardable(iseq) }
+        && !arg_setup_block; // TODO: the arg_setup_block part seems like a bug.
+                             // Blocks inside forwardable methods get the forwardable
+                             // param tag, but you shouldn't invoke the block
+                             // like a forwardable method. And blocks with ...
+                             // params is a syntax error. Propogation happens in
+                             // prepare_iseq_build()
     if forwarding_call {
         has_kwrest = false;
         doing_kw_call = false;
@@ -6896,7 +6902,9 @@ fn gen_send_iseq(
     exit_if_supplying_kw_and_has_no_kw(asm, supplying_kws, doing_kw_call)?;
     exit_if_supplying_kws_and_accept_no_kwargs(asm, supplying_kws, iseq)?;
     exit_if_doing_kw_and_splat(asm, doing_kw_call, flags)?;
-    exit_if_wrong_number_arguments(asm, arg_setup_block, opts_filled, flags, opt_num, iseq_has_rest)?;
+    if !forwarding_call {
+        exit_if_wrong_number_arguments(asm, arg_setup_block, opts_filled, flags, opt_num, iseq_has_rest)?;
+    }
     exit_if_doing_kw_and_opts_missing(asm, doing_kw_call, opts_missing)?;
     exit_if_has_rest_and_optional_and_block(asm, iseq_has_rest, opt_num, iseq, block_arg)?;
     let block_arg_type = exit_if_unsupported_block_arg_type(jit, asm, block_arg)?;
@@ -7442,9 +7450,12 @@ fn gen_send_iseq(
     }
 
     if forwarding_call {
-        let ci_slot = asm.stack_opnd(-4);
-        asm.mov(ci_slot, VALUE(ci as usize).into());
-        asm.spill_temps();
+        dbg!(get_iseq_name(iseq));
+        assert_eq!(4, num_params, "temporary. Only the CI should be necessary");
+        asm.mov(asm.stack_opnd(-1), 0xCAFEF02D_usize.into());
+        asm.mov(asm.stack_opnd(-2), 0xCAFEF01D_usize.into());
+        asm.mov(asm.stack_opnd(-3), 0xCAFEF00D_usize.into());
+        asm.mov(asm.stack_opnd(-4), VALUE(ci as usize).into());
     }
 
     // Points to the receiver operand on the stack unless a captured environment is used
