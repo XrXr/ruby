@@ -1052,7 +1052,7 @@ vm_caller_setup_arg_block(const rb_execution_context_t *ec, rb_control_frame_t *
 static void vm_adjust_stack_forwarding(const struct rb_execution_context_struct *ec, struct rb_control_frame_struct *cfp, CALL_INFO callers_info);
 
 static VALUE
-vm_caller_setup_arg(const rb_execution_context_t *ec, rb_control_frame_t *reg_cfp,
+vm_caller_setup_args(const rb_execution_context_t *ec, rb_control_frame_t *reg_cfp,
                     CALL_DATA *cd, const rb_iseq_t *blockiseq, const int is_super,
                     struct rb_forwarding_call_data *adjusted_cd, struct rb_callinfo *adjusted_ci)
 {

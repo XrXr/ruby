@@ -5811,7 +5811,7 @@ rb_vm_send(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, CALL_DATA cd
     struct rb_callinfo adjusted_ci;
     CALL_DATA _cd = cd;
 
-    VALUE bh = vm_caller_setup_arg(ec, GET_CFP(), &cd, blockiseq, false, &adjusted_cd, &adjusted_ci);
+    VALUE bh = vm_caller_setup_args(ec, GET_CFP(), &cd, blockiseq, false, &adjusted_cd, &adjusted_ci);
     VALUE val = vm_sendish(ec, GET_CFP(), cd, bh, mexp_search_method);
 
     if (vm_ci_flag(_cd->ci) & VM_CALL_FORWARDING) {
@@ -5842,7 +5842,7 @@ rb_vm_invokesuper(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, CALL_
     struct rb_callinfo adjusted_ci;
     CALL_DATA _cd = cd;
 
-    VALUE bh = vm_caller_setup_arg(ec, GET_CFP(), &cd, blockiseq, true, &adjusted_cd, &adjusted_ci);
+    VALUE bh = vm_caller_setup_args(ec, GET_CFP(), &cd, blockiseq, true, &adjusted_cd, &adjusted_ci);
     VALUE val = vm_sendish(ec, GET_CFP(), cd, bh, mexp_search_super);
 
     if (vm_ci_flag(_cd->ci) & VM_CALL_FORWARDING) {
