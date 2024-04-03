@@ -6828,14 +6828,25 @@ fn gen_send_iseq(
     // that the callee could use to know which keywords are unspecified
     // (see the `checkkeyword` instruction and check `ruby --dump=insn -e 'def foo(k:itself)=k'`).
     // We always need to set up this local if the call goes through.
-    let has_kwrest = unsafe { get_iseq_flags_has_kwrest(iseq) };
-    let doing_kw_call = unsafe { get_iseq_flags_has_kw(iseq) } || has_kwrest;
-    let supplying_kws = unsafe { vm_ci_flag(ci) & VM_CALL_KWARG } != 0;
-    let iseq_has_rest = unsafe { get_iseq_flags_has_rest(iseq) };
-    let iseq_has_block_param = unsafe { get_iseq_flags_has_block(iseq) };
+    let mut has_kwrest = unsafe { get_iseq_flags_has_kwrest(iseq) };
+    let mut doing_kw_call = unsafe { get_iseq_flags_has_kw(iseq) } || has_kwrest;
+    let mut supplying_kws = unsafe { vm_ci_flag(ci) & VM_CALL_KWARG } != 0;
+    let mut iseq_has_rest = unsafe { get_iseq_flags_has_rest(iseq) };
+    let mut iseq_has_block_param = unsafe { get_iseq_flags_has_block(iseq) };
     let arg_setup_block = captured_opnd.is_some(); // arg_setup_type: arg_setup_block (invokeblock)
-    let kw_splat = flags & VM_CALL_KW_SPLAT != 0;
-    let splat_call = flags & VM_CALL_ARGS_SPLAT != 0;
+    let mut kw_splat = flags & VM_CALL_KW_SPLAT != 0;
+    let mut splat_call = flags & VM_CALL_ARGS_SPLAT != 0;
+
+    let forwarding_call = unsafe { rb_get_iseq_flags_forwardable(iseq) };
+    if forwarding_call {
+        has_kwrest = false;
+        doing_kw_call = false;
+        iseq_has_rest = false;
+        supplying_kws = false;
+        iseq_has_block_param = false;
+        kw_splat = false;
+        splat_call = false;
+    }
 
     // For computing offsets to callee locals
     let num_params = unsafe { get_iseq_body_param_size(iseq) as i32 };
@@ -6868,6 +6879,12 @@ fn gen_send_iseq(
     let block_arg = flags & VM_CALL_ARGS_BLOCKARG != 0;
     // Stack index of the splat array
     let splat_pos = i32::from(block_arg) + i32::from(kw_splat) + kw_arg_num;
+
+    // Dynamic stack layout. No good way to support without inlining.
+    if flags & VM_CALL_FORWARDING != 0 {
+        gen_counter_incr(asm, Counter::send_iseq_forwarding);
+        return None;
+    }
 
     exit_if_stack_too_large(iseq)?;
     exit_if_tail_call(asm, ci)?;
@@ -7392,6 +7409,7 @@ fn gen_send_iseq(
         }
     }
 
+    if !forwarding_call {
     // Nil-initialize missing optional parameters
     nil_fill(
         "nil-initialize missing optionals",
@@ -7421,6 +7439,13 @@ fn gen_send_iseq(
         },
         asm
     );
+    }
+
+    if forwarding_call {
+        let ci_slot = asm.stack_opnd(-4);
+        asm.mov(ci_slot, VALUE(ci as usize).into());
+        asm.spill_temps();
+    }
 
     // Points to the receiver operand on the stack unless a captured environment is used
     let recv = match captured_opnd {
@@ -7439,8 +7464,13 @@ fn gen_send_iseq(
     jit_save_pc(jit, asm);
 
     // Adjust the callee's stack pointer
-    let offs = SIZEOF_VALUE_I32 * (-argc + num_locals + VM_ENV_DATA_SIZE as i32);
-    let callee_sp = asm.lea(asm.ctx.sp_opnd(offs));
+    let callee_sp = if forwarding_call {
+        let offs = SIZEOF_VALUE_I32 * (num_locals + VM_ENV_DATA_SIZE as i32);
+        asm.lea(asm.ctx.sp_opnd(offs))
+    } else {
+        let offs = SIZEOF_VALUE_I32 * (-argc + num_locals + VM_ENV_DATA_SIZE as i32);
+        asm.lea(asm.ctx.sp_opnd(offs))
+    };
 
     let specval = if let Some(prev_ep) = prev_ep {
         // We've already side-exited if the callee expects a block, so we
