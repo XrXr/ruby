@@ -1062,7 +1062,14 @@ vm_caller_setup_arg(const rb_execution_context_t *ec, rb_control_frame_t *reg_cf
     if (vm_ci_flag(site_ci) & VM_CALL_FORWARDING) {
         RUBY_ASSERT(ISEQ_BODY(GET_ISEQ())->param.flags.forwardable);
         CALL_INFO caller_ci = (CALL_INFO)TOPN(0);
-        bh = VM_ENV_BLOCK_HANDLER(GET_LEP());
+
+        // Need to setup the block in case of e.g. `super { :block }`
+        if (is_super && blockiseq) {
+            bh = vm_caller_setup_arg_block(ec, GET_CFP(), site_ci, blockiseq, true);
+        }
+        else {
+            bh = VM_ENV_BLOCK_HANDLER(GET_LEP());
+        }
 
         vm_adjust_stack_forwarding(ec, GET_CFP(), caller_ci);
         *adjusted_ci = VM_CI_ON_STACK(
