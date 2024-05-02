@@ -30,13 +30,13 @@ pub fn yjit_enabled_p() -> bool {
 /// This function is called from C code
 #[no_mangle]
 pub extern "C" fn rb_yjit_init(yjit_enabled: bool) {
-    // Register the method codegen functions. This must be done at boot.
-    yjit_reg_method_codegen_fns();
-
     // If --yjit-disable, yjit_init() will not be called until RubyVM::YJIT.enable.
     if yjit_enabled && !get_option!(disable) {
         yjit_init();
     }
+
+    // Register the method codegen functions. This must be done at boot.
+    yjit_reg_method_codegen_fns();
 }
 
 /// Initialize and enable YJIT. You should call this at boot or with GVL.
@@ -47,10 +47,10 @@ fn yjit_init() {
     // Catch panics to avoid UB for unwinding into C frames.
     // See https://doc.rust-lang.org/nomicon/exception-safety.html
     let result = std::panic::catch_unwind(|| {
+        ids::init();
         Invariants::init();
         CodegenGlobals::init();
         YjitExitLocations::init();
-        ids::init();
 
         rb_bug_panic_hook();
 

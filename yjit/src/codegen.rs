@@ -24,6 +24,8 @@ use std::ptr;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::slice;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 
 pub use crate::virtualmem::CodePtr;
 
@@ -192,9 +194,26 @@ impl JITState {
         }
     }
 
+    // Get an argument of the next instruction
+    pub fn next_insn_arg(&self, arg_idx: usize) -> VALUE {
+        let current_len = insn_len(self.get_opcode()).as_usize();
+        unsafe {
+            let next_pc = self.pc.add(current_len);
+            let next_opcode = rb_iseq_opcode_at_pc(self.iseq, next_pc);
+            assert!(insn_len(next_opcode as usize) as usize > (arg_idx + 1));
+            next_pc.add(arg_idx + 1).read()
+        }
+    }
+
     // Get the index of the next instruction
     fn next_insn_idx(&self) -> u16 {
         self.insn_idx + insn_len(self.get_opcode()) as u16
+    }
+
+    // Get the opcode of the next instruction
+    pub fn next_insn_opcode(&self) -> ruby_vminsn_type {
+        let next_idx = self.next_insn_idx();
+        iseq_opcode_at_idx(self.iseq, next_idx.into())
     }
 
     // Check if we are compiling the instruction at the stub PC
@@ -1465,6 +1484,10 @@ fn gen_putobject(
         return Some(result);
     }
 
+    if let Some(result) = fuse_literal_unpack1(jit, asm, arg, ocb) {
+        return Some(result);
+    }
+
     jit_putobject(asm, arg);
     Some(KeepCompiling)
 }
@@ -1522,6 +1545,82 @@ fn fuse_putobject_opt_ltlt(
         return Some(SkipNextInsn);
     }
     return None;
+}
+
+// The method serial for the builtin String#unpack1. Setup during boot.
+static mut BUILTIN_UNPACK1_SERIAL: usize = 0;
+
+/// Try to specialize for calls to `String#unpack1` with a literal
+/// format string (e.g `buffer.unpack1("D")`) by combining
+/// `pubobject` / `putstring` and `opt_send_without_block` pairs.
+fn fuse_literal_unpack1(
+    jit: &mut JITState,
+    asm: &mut Assembler,
+    constant_object: VALUE,
+    ocb: &mut OutlinedCb,
+) -> Option<CodegenStatus> {
+    if unsafe { !RB_TYPE_P(constant_object, RUBY_T_STRING) } {
+        return None;
+    }
+    let format = constant_object;
+
+    // Check if we can handle the format string
+    let str_ptr = unsafe { rb_RSTRING_PTR(format) } as *mut u8;
+    let str_len: usize = unsafe { rb_RSTRING_LEN(format) }.try_into().ok()?;
+    let str_slice: &[u8] = unsafe { slice::from_raw_parts(str_ptr, str_len) };
+    if let Some(b'D' | b'F') = str_slice.first() {
+        // TODO: check for ascii compat
+        // continue
+    } else {
+        return None;
+    }
+
+    // Check if it's a method call to `unpack1`.
+    if jit.next_insn_opcode() != YARVINSN_opt_send_without_block {
+        return None;
+    }
+    let cd = jit.next_insn_arg(0).as_ptr();
+    let ci = unsafe { get_call_data_ci(cd) }; // info about the call site
+    let argc: isize = unsafe { vm_ci_argc(ci) }.try_into().ok()?;
+    let mid = unsafe { vm_ci_mid(ci) };
+    let flags = unsafe { vm_ci_flag(ci) };
+    // Only look for calls that send literally "unpack1". Other names could
+    // resolve to the right method, but to check each candidate we need
+    // to use `defer_compilation` which incurs a memory cost we want to
+    // minimize.
+    if mid != ID!(unpack1) {
+        return None;
+    }
+
+    // Reject `&block_arg` calls
+    // TODO: make sure to have a test for `...` since Aaron's branch adds a new way of changing
+    // where the receiver is.
+    if flags & VM_CALL_ARGS_BLOCKARG != 0 {
+        return None;
+    }
+
+    // Peek at receiver to check the call target
+    if !jit.at_current_insn() {
+        defer_compilation(jit, asm, ocb);
+        return Some(EndBlock);
+    }
+    // Usually the receiver is at `argc` on the stack, but we're running before
+    // the last argument is pushed to the stack.
+    let receiver = jit.peek_at_stack(&asm.ctx, argc - 1);
+
+    // Check if the call on the compile-time sample lands in the builtin String#unpack1
+    let cme = unsafe { rb_callable_method_entry(receiver.class_of(), mid) };
+    if cme.is_null() {
+        // no method on the object
+        return None;
+    }
+    if unsafe { get_def_method_serial((*cme).def) != BUILTIN_UNPACK1_SERIAL } {
+        return None;
+    }
+
+    dbg!("yay");
+
+    None
 }
 
 fn gen_putself(
@@ -10237,6 +10336,7 @@ pub fn yjit_reg_method_codegen_fns() {
         yjit_reg_method(rb_cString, "byteslice", jit_rb_str_byteslice);
         yjit_reg_method(rb_cString, "<<", jit_rb_str_concat);
         yjit_reg_method(rb_cString, "+@", jit_rb_str_uplus);
+        BUILTIN_UNPACK1_SERIAL = boot_time_method_serial(rb_cString, ID!(unpack1));
 
         yjit_reg_method(rb_cNilClass, "===", jit_rb_case_equal);
         yjit_reg_method(rb_cTrueClass, "===", jit_rb_case_equal);
@@ -10266,22 +10366,16 @@ pub fn yjit_reg_method_codegen_fns() {
 fn yjit_reg_method(klass: VALUE, mid_str: &str, gen_fn: MethodGenFn) {
     let id_string = std::ffi::CString::new(mid_str).expect("couldn't convert to CString!");
     let mid = unsafe { rb_intern(id_string.as_ptr()) };
-    let me = unsafe { rb_method_entry_at(klass, mid) };
-
-    if me.is_null() {
-        panic!("undefined optimized method!: {mid_str}");
-    }
-
-    // For now, only cfuncs are supported
-    //RUBY_ASSERT(me && me->def);
-    //RUBY_ASSERT(me->def->type == VM_METHOD_TYPE_CFUNC);
-
-    let method_serial = unsafe {
-        let def = (*me).def;
-        get_def_method_serial(def)
-    };
-
+    let method_serial = boot_time_method_serial(klass, mid);
     unsafe { METHOD_CODEGEN_TABLE.as_mut().unwrap().insert(method_serial, gen_fn); }
+}
+
+fn boot_time_method_serial(class_or_module: VALUE, method_id: ID) -> usize{
+    let me = unsafe { rb_method_entry_at(class_or_module, method_id) };
+
+    assert!(!me.is_null(), "method #{method_id} not found during boot");
+
+    unsafe { get_def_method_serial((*me).def) }
 }
 
 /// Global state needed for code generation
