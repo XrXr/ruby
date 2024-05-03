@@ -36,6 +36,7 @@ pub extern "C" fn rb_yjit_init(yjit_enabled: bool) {
     }
 
     // Register the method codegen functions. This must be done at boot.
+    ids::init();
     yjit_reg_method_codegen_fns();
 }
 
@@ -47,7 +48,6 @@ fn yjit_init() {
     // Catch panics to avoid UB for unwinding into C frames.
     // See https://doc.rust-lang.org/nomicon/exception-safety.html
     let result = std::panic::catch_unwind(|| {
-        ids::init();
         Invariants::init();
         CodegenGlobals::init();
         YjitExitLocations::init();
