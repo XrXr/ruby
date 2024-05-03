@@ -539,6 +539,8 @@ make_counters! {
     splatkw_not_hash,
     splatkw_not_nil,
 
+    unpack1_exception,
+
     binding_allocations,
     binding_set,
 

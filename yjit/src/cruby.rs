@@ -806,6 +806,7 @@ pub(crate) mod ids {
         name: to_ary             content: b"to_ary"
         name: eq                 content: b"=="
         name: unpack1            content: b"unpack1"
+        name: offset             content: b"offset"
     }
 }
 

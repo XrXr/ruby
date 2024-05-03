@@ -1063,6 +1063,36 @@ rb_assert_cme_handle(VALUE handle)
     RUBY_ASSERT_ALWAYS(IMEMO_TYPE_P(handle, imemo_ment));
 }
 
+// String#unpack1 specialized for the format string of "D". Can return Qundef
+// to bail and cause caller to use the normal implementation.
+VALUE
+rb_yjit_unpack1_d(VALUE buf, VALUE off_v)
+{
+    // Because the method can only be found on string subclasses, we know
+    // `buf` is already a T_STRING without having to check.
+    if (!RB_FIXNUM_P(off_v)) {
+        return Qundef;
+    }
+    long offset = FIX2LONG(off_v);
+    long len = RSTRING_LEN(buf);
+
+    if (offset < 0) return Qundef;
+    if (offset > len) return Qundef;
+
+    const char *start = RSTRING_PTR(buf) + offset;
+    const char *end = RSTRING_PTR(buf) + len;
+
+    // return nil when not large enough
+    if (start + sizeof(double) >= end) {
+        return Qnil;
+    }
+
+    // Read the double and return it
+    double d;
+    memcpy(&d, start, sizeof(d));
+    return DBL2NUM(d);
+}
+
 // Used for passing a callback and other data over rb_objspace_each_objects
 struct iseq_callback_data {
     rb_iseq_callback callback;

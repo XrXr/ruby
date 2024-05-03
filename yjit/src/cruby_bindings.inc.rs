@@ -1235,6 +1235,7 @@ extern "C" {
     pub fn rb_assert_iseq_handle(handle: VALUE);
     pub fn rb_IMEMO_TYPE_P(imemo: VALUE, imemo_type: imemo_type) -> ::std::os::raw::c_int;
     pub fn rb_assert_cme_handle(handle: VALUE);
+    pub fn rb_yjit_unpack1_d(buf: VALUE, offset: VALUE) -> VALUE;
     pub fn rb_yjit_for_each_iseq(callback: rb_iseq_callback, data: *mut ::std::os::raw::c_void);
     pub fn rb_yjit_obj_written(
         old: VALUE,

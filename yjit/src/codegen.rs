@@ -24,8 +24,6 @@ use std::ptr;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::slice;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering;
 
 pub use crate::virtualmem::CodePtr;
 
@@ -194,26 +192,9 @@ impl JITState {
         }
     }
 
-    // Get an argument of the next instruction
-    pub fn next_insn_arg(&self, arg_idx: usize) -> VALUE {
-        let current_len = insn_len(self.get_opcode()).as_usize();
-        unsafe {
-            let next_pc = self.pc.add(current_len);
-            let next_opcode = rb_iseq_opcode_at_pc(self.iseq, next_pc);
-            assert!(insn_len(next_opcode as usize) as usize > (arg_idx + 1));
-            next_pc.add(arg_idx + 1).read()
-        }
-    }
-
     // Get the index of the next instruction
     fn next_insn_idx(&self) -> u16 {
         self.insn_idx + insn_len(self.get_opcode()) as u16
-    }
-
-    // Get the opcode of the next instruction
-    pub fn next_insn_opcode(&self) -> ruby_vminsn_type {
-        let next_idx = self.next_insn_idx();
-        iseq_opcode_at_idx(self.iseq, next_idx.into())
     }
 
     // Check if we are compiling the instruction at the stub PC
@@ -1484,10 +1465,6 @@ fn gen_putobject(
         return Some(result);
     }
 
-    if let Some(result) = fuse_literal_unpack1(jit, asm, arg, ocb) {
-        return Some(result);
-    }
-
     jit_putobject(asm, arg);
     Some(KeepCompiling)
 }
@@ -1553,35 +1530,12 @@ static mut BUILTIN_UNPACK1_SERIAL: usize = 0;
 /// Try to specialize for calls to `String#unpack1` with a literal
 /// format string (e.g `buffer.unpack1("D")`) by combining
 /// `pubobject` / `putstring` and `opt_send_without_block` pairs.
-fn fuse_literal_unpack1(
+fn specialize_string_unpack1(
     jit: &mut JITState,
     asm: &mut Assembler,
-    constant_object: VALUE,
-    ocb: &mut OutlinedCb,
+    ci: *const rb_callinfo,
 ) -> Option<CodegenStatus> {
-    if unsafe { !RB_TYPE_P(constant_object, RUBY_T_STRING) } {
-        return None;
-    }
-    let format = constant_object;
-
-    // Check if we can handle the format string
-    let str_ptr = unsafe { rb_RSTRING_PTR(format) } as *mut u8;
-    let str_len: usize = unsafe { rb_RSTRING_LEN(format) }.try_into().ok()?;
-    let str_slice: &[u8] = unsafe { slice::from_raw_parts(str_ptr, str_len) };
-    if let Some(b'D' | b'F') = str_slice.first() {
-        // TODO: check for ascii compat
-        // continue
-    } else {
-        return None;
-    }
-
-    // Check if it's a method call to `unpack1`.
-    if jit.next_insn_opcode() != YARVINSN_opt_send_without_block {
-        return None;
-    }
-    let cd = jit.next_insn_arg(0).as_ptr();
-    let ci = unsafe { get_call_data_ci(cd) }; // info about the call site
-    let argc: isize = unsafe { vm_ci_argc(ci) }.try_into().ok()?;
+    let argc: i32 = unsafe { vm_ci_argc(ci) }.try_into().ok()?;
     let mid = unsafe { vm_ci_mid(ci) };
     let flags = unsafe { vm_ci_flag(ci) };
     // Only look for calls that send literally "unpack1". Other names could
@@ -1592,35 +1546,73 @@ fn fuse_literal_unpack1(
         return None;
     }
 
-    // Reject `&block_arg` calls
+    // Reject splat, blockarg, and kwsplat calls.
     // TODO: make sure to have a test for `...` since Aaron's branch adds a new way of changing
     // where the receiver is.
-    if flags & VM_CALL_ARGS_BLOCKARG != 0 {
+    if flags & (VM_CALL_ARGS_SPLAT | VM_CALL_ARGS_BLOCKARG | VM_CALL_KW_SPLAT) != 0 {
         return None;
     }
 
-    // Peek at receiver to check the call target
-    if !jit.at_current_insn() {
-        defer_compilation(jit, asm, ocb);
-        return Some(EndBlock);
-    }
-    // Usually the receiver is at `argc` on the stack, but we're running before
-    // the last argument is pushed to the stack.
-    let receiver = jit.peek_at_stack(&asm.ctx, argc - 1);
+    let kw_arg = unsafe { vm_ci_kwarg(ci) };
+    match argc {
+        // When argc=1, there should be no keywords
+        1 => if !kw_arg.is_null() { return None; }
+        // Check that we're only passing `offset` if there is any keywords
+        2 => if unsafe { kw_arg.is_null() ||
+                get_cikw_keyword_len(kw_arg) != 1 ||
+                ID!(offset) != rb_sym2id(get_cikw_keywords_idx(kw_arg, 0)) } {
+            return None;
+        }
+        _ => { return None; }
+    };
 
-    // Check if the call on the compile-time sample lands in the builtin String#unpack1
-    let cme = unsafe { rb_callable_method_entry(receiver.class_of(), mid) };
-    if cme.is_null() {
-        // no method on the object
+    // Now the stack should be `format` if argc=1, and `format, offset` if argc=2
+    let format_stack_idx = if argc == 1 { 0 } else { 1 };
+    let sample_format = jit.peek_at_stack(&asm.ctx, format_stack_idx);
+
+    // Only try to specialize when the format string is frozen, since we want to
+    // guard the string by identity, betting that the call is done with a string
+    // literal.
+    if unsafe { !RB_TYPE_P(sample_format, RUBY_T_STRING) } {
         return None;
     }
-    if unsafe { get_def_method_serial((*cme).def) != BUILTIN_UNPACK1_SERIAL } {
+    if !sample_format.is_frozen() {
         return None;
     }
 
-    dbg!("yay");
+    // Check if we can handle the format string
+    let str_ptr = unsafe { rb_RSTRING_PTR(sample_format) } as *mut u8;
+    let str_len: usize = unsafe { rb_RSTRING_LEN(sample_format) }.try_into().ok()?;
+    let str_slice: &[u8] = unsafe { slice::from_raw_parts(str_ptr, str_len) };
+    if let Some(b'D') = str_slice.first() {
+        // TODO: check for ascii compat
+        // continue
+    } else {
+        return None;
+    }
 
-    None
+    asm.cmp(asm.stack_opnd(format_stack_idx as i32), sample_format.into());
+    asm.jne(Target::side_exit(Counter::unpack1_exception)); //
+
+    // Save the PC and SP because we are allocating
+    jit_prepare_call_with_gc(jit, asm);
+
+    // Default the `offset` keyword argument to 0 if not passed
+    let offset_arg = if argc == 2 {
+        asm.stack_opnd(0)
+    } else {
+        VALUE::fixnum_from_usize(0).into()
+    };
+
+    let ret = asm.ccall(rb_yjit_unpack1_d as _, vec![asm.stack_opnd(argc), offset_arg]);
+    asm.cmp(ret, Qundef.into());
+    asm.je(Target::side_exit(Counter::unpack1_exception));
+
+    asm.stack_pop((argc + 1) as usize);
+    let top_slot = asm.stack_push(Type::Unknown);
+    asm.mov(top_slot, ret);
+
+    Some(KeepCompiling)
 }
 
 fn gen_putself(
@@ -8662,6 +8654,12 @@ fn gen_send_general(
     // Register block for invalidation
     //assert!(cme->called_id == mid);
     jit.assume_method_lookup_stable(asm, ocb, cme);
+
+    if unsafe { get_def_method_serial((*cme).def) == BUILTIN_UNPACK1_SERIAL } {
+        if let Some(result) = specialize_string_unpack1(jit, asm, ci) {
+            return Some(result);
+        }
+    }
 
     // To handle the aliased method case (VM_METHOD_TYPE_ALIAS)
     loop {
