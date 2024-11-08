@@ -106,12 +106,14 @@ jobs:
         env:
           VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
         shell: pwsh
+        continue-on-error: true
 
       - name: cat logs
         run: |
-          type C:\vcpkg\buildtrees\gmp\build-x64-windows-dbg-out.log
-          type C:\vcpkg\buildtrees\gmp\build-x64-windows-dbg-err.log
+          ls C:\vcpkg\buildtrees\gmp
+          cat C:\vcpkg\buildtrees\gmp\*.log
           false
+        shell: pwsh
 
       - uses: msys2/setup-msys2@d40200dc2db4c351366b048a9565ad82919e1c24 # v2
         id: setup-msys2
