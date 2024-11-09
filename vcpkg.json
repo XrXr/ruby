@@ -8,13 +8,15 @@
     "zlib"
   ],
   "builtin-baseline": "a4275b7eee79fb24ec2e135481ef5fce8b41c339",
-  "registries": [
-    {
-      "kind": "git",
-      "repository": "https://github.com/microsoft/vcpkg",
-      "reference": "vcpkg-registry",
-      "baseline": "b9fe496e225dfe6ee362f2382279654e3d6eb618",
-      "packages": [ "gmp" ]
-    }
-  ]
+  "vcpkg-configuration": {
+    "registries": [
+      {
+        "kind": "git",
+        "repository": "https://github.com/microsoft/vcpkg",
+        "reference": "vcpkg-registry",
+        "baseline": "b9fe496e225dfe6ee362f2382279654e3d6eb618",
+        "packages": [ "gmp" ]
+      }
+    ]
+  }
 }
