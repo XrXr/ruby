@@ -13,6 +13,7 @@
       {
         "kind": "git",
         "repository": "https://github.com/microsoft/vcpkg",
+        "reference": "b9fe496e225dfe6ee362f2382279654e3d6eb618",
         "baseline": "b9fe496e225dfe6ee362f2382279654e3d6eb618",
         "packages": [ "gmp" ]
       }
