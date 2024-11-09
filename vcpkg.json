@@ -1,11 +1,20 @@
 {
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "dependencies": [
-    "gmp",
+    { "name": "gmp", "version>=", "6.3.0#1" },
     "libffi",
     "libyaml",
     "openssl",
     "zlib"
   ],
-  "builtin-baseline": "b9fe496e225dfe6ee362f2382279654e3d6eb618"
+  "builtin-baseline": "a4275b7eee79fb24ec2e135481ef5fce8b41c339",
+  "registries": [
+    {
+      "kind": "git",
+      "repository": "https://github.com/microsoft/vcpkg",
+      "reference": "vcpkg-registry",
+      "baseline": "b9fe496e225dfe6ee362f2382279654e3d6eb618",
+      "packages": [ "gmp" ]
+    }
+  ]
 }
