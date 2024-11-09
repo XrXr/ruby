@@ -97,12 +97,11 @@ jobs:
         run: |
           [collections.arraylist]$path = $env:path -split ';'
           echo $path
+          $path.remove('C:\Program Files\Git\mingw64\bin')
+          $path.remove('C:\Program Files\Git\usr\bin')
           $path.remove('C:\mingw64\bin')
           $env:Path = $path -join ';'
           echo $env:Path
-
-          Remove-Item -Path /usr/bin/sed -Force
-
           vcpkg install
         working-directory: src
         env:
