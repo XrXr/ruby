@@ -95,11 +95,15 @@ jobs:
 
       - name: Install libraries with vcpkg
         run: |
+          <#
           [collections.arraylist]$path = $env:path -split ';'
           $path.remove('C:\Program Files\Git\mingw64\bin')
           $path.remove('C:\mingw64\bin')
           $env:Path = $path -join ';'
           echo $env:Path
+          #>
+
+          $env:Path = 'C:\vcpkg'
 
           vcpkg install
         working-directory: src
