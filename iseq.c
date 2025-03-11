@@ -531,6 +531,17 @@ rb_iseq_pathobj_set(const rb_iseq_t *iseq, VALUE path, VALUE realpath)
                  rb_iseq_pathobj_new(path, realpath));
 }
 
+// Make a dummy iseq for a dummy frame that expose a path for profilers to inspect
+rb_iseq_t *
+rb_iseq_alloc_with_dummy_path(VALUE fname)
+{
+    rb_iseq_t *dummy_iseq = iseq_alloc();
+
+    ISEQ_BODY(dummy_iseq)->type = ISEQ_TYPE_TOP;
+    ISEQ_BODY(dummy_iseq)->location.pathobj = fname;
+    return dummy_iseq;
+}
+
 static rb_iseq_location_t *
 iseq_location_setup(rb_iseq_t *iseq, VALUE name, VALUE path, VALUE realpath, int first_lineno, const rb_code_location_t *code_location, const int node_id)
 {
